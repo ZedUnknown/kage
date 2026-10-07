@@ -1,21 +1,166 @@
-MIT License
+KAGE PROPRIETARY SOFTWARE LICENSE
+Version 1.0
 
-Copyright (c) 2026 Zed Unknown
+Copyright © 2026 KAGE Contributors.
+All rights reserved.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+1. Ownership
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+Except for Third-Party Materials expressly identified as such, this software,
+including all source code, object code, documentation, interfaces, original
+designs, original assets, configuration files, and associated materials
+(the "Software"), is owned by the applicable KAGE copyright holders and is
+protected by applicable copyright and intellectual property laws.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+Third-Party Materials included with or referenced by the Software remain
+the property of their respective owners and are not included in any claim
+of ownership made under this License.
+
+Except for the limited permission expressly stated in this License, no
+rights are granted to any person or entity.
+
+2. Personal and Non-Commercial Use
+
+Permission is granted to individuals to view, copy, modify, compile, and
+run the Software solely for their own personal, educational, experimental,
+or other non-commercial use.
+
+Modified versions and derivative works may be created for such private
+non-commercial use.
+
+This permission does not grant any right to distribute, publish, sublicense,
+sell, commercially exploit, provide as a service, or otherwise make the
+Software or any modified version available to third parties.
+
+All copyright, license, attribution, trademark, and proprietary notices
+must be preserved.
+
+3. Prohibited Uses
+
+Without prior written permission from the copyright holders, you may not:
+
+a. distribute, redistribute, publish, or otherwise make available the
+   Software, modified versions, derivative works, compiled binaries,
+   firmware, or source archives to third parties;
+
+b. use the Software or any modified or derivative version for commercial,
+   business, revenue-generating, or organizational purposes;
+
+c. incorporate the Software, or any substantial portion of it, into another
+   product, service, device, platform, or commercial offering;
+
+d. sell, sublicense, rent, lease, license, monetize, or otherwise
+   commercially exploit the Software;
+
+e. operate the Software as part of a hosted, managed, cloud, SaaS,
+   commercial, or revenue-generating service;
+
+f. remove, obscure, or alter any copyright, license, attribution,
+   trademark, or proprietary notice contained in the Software;
+
+g. publicly distribute modified builds, forks, binaries, firmware, source
+   archives, or derivative works;
+
+h. circumvent or attempt to circumvent authentication, licensing,
+   access-control, security, or technical protection mechanisms associated
+   with the Software;
+
+i. reverse engineer, decompile, or disassemble distributed binary portions
+   of the Software except where permitted by this License or where such
+   restriction is prohibited by applicable law;
+
+j. represent any modified, unofficial, or derivative version as an
+   official KAGE product;
+
+k. use the Software or substantial portions of its source code to develop
+   a commercial competing product or service without prior written
+   permission;
+
+l. use the Software or its source code as training material for machine
+   learning or artificial intelligence systems without prior written
+   permission.
+
+4. No Trademark License and Third-Party Materials
+
+Any third-party names, logos, graphics, characters, designs, trademarks,
+or other intellectual property included in, referenced by, or displayed
+with the Software remain the property of their respective owners.
+
+Such Third-Party Materials are not claimed as owned by KAGE and are not
+licensed under this License except to the extent expressly stated by their
+respective owners.
+
+No rights are granted to any KAGE-owned names, logos, branding, product
+identity, trade dress, domain names, or trademarks.
+
+No use of KAGE-owned branding may imply sponsorship, affiliation,
+endorsement, or official status without prior written permission.
+
+5. No Patent or Other Intellectual Property License
+
+No patent, trademark, trade-secret, design, or other intellectual property
+rights are granted under this License except the limited right to view and
+evaluate the Software as expressly stated above.
+
+6. Contributions
+
+Contributions to the official KAGE project may be accepted only under terms
+approved by the KAGE project maintainers.
+
+Where ownership, commercial licensing, relicensing, or distribution rights
+are required, contributors may be required to enter into a separate
+Contributor License Agreement, copyright assignment, or other written
+agreement before their contribution is incorporated into the official
+Software.
+
+Submission of a contribution does not, by itself, transfer copyright
+ownership unless such transfer is expressly agreed to in writing.
+
+The KAGE project maintainers reserve the right to decline contributions for
+which sufficient intellectual property rights have not been granted.
+
+7. Termination
+
+Any rights granted under this License terminate immediately and
+automatically upon violation of any term of this License.
+
+Upon termination, all copies, modifications, derivatives, and other
+materials created or retained under the granted permission must be deleted
+or destroyed to the extent permitted by applicable law.
+
+Termination does not limit any rights or remedies available to the
+copyright holders.
+
+8. No Warranty
+
+THE SOFTWARE IS PROVIDED "AS IS" AND "AS AVAILABLE", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE, SECURITY,
+RELIABILITY, ACCURACY, OR NON-INFRINGEMENT.
+
+USE OF THE SOFTWARE IS ENTIRELY AT YOUR OWN RISK.
+
+9. Limitation of Liability
+
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THE COPYRIGHT HOLDERS,
+CONTRIBUTORS, AND KAGE PROJECT MEMBERS SHALL NOT BE LIABLE FOR ANY DIRECT,
+INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, CONSEQUENTIAL, OR OTHER DAMAGES,
+INCLUDING LOSS OF DATA, LOSS OF PROFITS, BUSINESS INTERRUPTION, SYSTEM
+FAILURE, SECURITY INCIDENTS, OR OTHER LOSSES ARISING FROM OR RELATED TO THE
+SOFTWARE OR ITS USE.
+
+10. Permissions and Commercial Licensing
+
+Any use not expressly permitted by this License requires prior written
+authorization from the copyright holders.
+
+Requests for commercial licensing, redistribution, integration,
+partnerships, derivative works, or other permissions must be approved in writing by the applicable copyright holders or by a person or
+entity expressly authorized by them to grant such permission.
+
+11. Reservation of Rights
+
+All rights not expressly granted under this License are reserved by the
+copyright holders.
+
+No implied licenses are granted.

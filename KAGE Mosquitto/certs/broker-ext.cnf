@@ -1,0 +1,6 @@
+basicConstraints = critical,CA:FALSE
+keyUsage = critical,digitalSignature,keyEncipherment
+extendedKeyUsage = serverAuth
+subjectAltName = IP:192.168.1.23,DNS:192.168.1.23
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid,issuer

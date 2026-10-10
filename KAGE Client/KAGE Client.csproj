@@ -1,0 +1,81 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <RootNamespace>KAGE_Client</RootNamespace>
+    <AssemblyName>KAGE_Client</AssemblyName>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Keep WinForms tray support from introducing ambiguous WPF type names. -->
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove=".verification\**" />
+    <Page Remove=".verification\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="Assets\Images\**" />
+    <EmbeddedResource Remove="Assets\Images\**" />
+    <None Remove="Assets\Images\**" />
+    <Page Remove="Assets\Images\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Remove="Assets\Fonts\arame-mono-regular.ttf" />
+    <None Remove="Assets\Fonts\arame-mono-Bold.ttf" />
+    <None Remove="Assets\Fonts\Rajdhani-Bold.ttf" />
+    <None Remove="Assets\Fonts\Rajdhani-Light.ttf" />
+    <None Remove="Assets\Fonts\Rajdhani-Medium.ttf" />
+    <None Remove="Assets\Fonts\Rajdhani-Regular.ttf" />
+    <None Remove="Assets\Fonts\Rajdhani-SemiBold.ttf" />
+    <None Remove="Assets\Icons\kage.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="Assets\Icons\kage.ico">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="WPF-UI" Version="4.3.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\Fonts\arame-mono-regular.ttf">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Resource>
+    <Resource Include="Assets\Fonts\arame-mono-Bold.ttf">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Resource>
+    <Resource Include="Assets\Fonts\Rajdhani-Bold.ttf">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Resource>
+    <Resource Include="Assets\Fonts\Rajdhani-Light.ttf">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Resource>
+    <Resource Include="Assets\Fonts\Rajdhani-Medium.ttf">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Resource>
+    <Resource Include="Assets\Fonts\Rajdhani-Regular.ttf">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Resource>
+    <Resource Include="Assets\Fonts\Rajdhani-SemiBold.ttf">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Resource>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="Apis\" />
+  </ItemGroup>
+
+</Project>

@@ -1152,23 +1152,6 @@ Wi-Fi passwords
 other private credentials
 ```
 
-A suitable `.gitignore`:
-
-```gitignore
-# Private cryptographic keys
-*.key
-
-# Mosquitto credentials
-passwd
-
-# Environment / secrets
-.env
-.env.*
-
-secrets.*
-credentials.*
-```
-
 The most sensitive certificate-related file is:
 
 ```text

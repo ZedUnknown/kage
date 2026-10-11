@@ -179,7 +179,7 @@ public partial class LockOverlay : FluentWindow, INotifyPropertyChanged {
         Topmost = !_commandManager.ShowSafetyButton;
         ShowInTaskbar = _commandManager.ShowSafetyButton;
         // -1 = HWND_TOPMOST, -2 = HWND_NOTOPMOST, 0 = HWND_TOP
-        SetWindowPos(handle, new IntPtr(CommandManager.safetyButton ? -2 : -1), bounds.X, bounds.Y, bounds.Width, bounds.Height, 0x0040);
+        SetWindowPos(handle, new IntPtr(Topmost ? -1 : -2), bounds.X, bounds.Y, bounds.Width, bounds.Height, 0x0040);
         // Keep a horizontal band even on small displays or high scaling settings.
         double dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
         double scale = Math.Min(1, Math.Min(bounds.Width / dpi / 1100, bounds.Height / dpi / 700));

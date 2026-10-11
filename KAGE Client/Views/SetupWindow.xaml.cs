@@ -1,4 +1,4 @@
-﻿using System.Net.Http;
+using System.Net.Http;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Media;
@@ -18,14 +18,24 @@ public partial class SetupWindow : FluentWindow {
     private string? _serverAddress = null;
     private string? _hubId = null;
     private string? _pcId = null;
+    private string[] _availablePcs = [];
+    private bool _isPendingRequest;
 
 
     public SetupWindow() {
         InitializeComponent();
         _currentPage = ServerPage;
+
+        // subscribe to text changed events to reset the lower class fields when the user modifies upper class configuration fields
+        ServerAddressBox.TextChanged += (_, _) => {
+            ServerNextButton.Visibility = Visibility.Collapsed;
+            ResetAfterServerChange();
+        };
+        HubIdBox.TextChanged += (_, _) => ResetAfterHubChange();
     }
 
     private async void ServerConnectButton_Click(object sender, RoutedEventArgs e) {
+        if (_isPendingRequest) return;
         string serverAddress = ServerAddressBox.Text.Trim();
 
         ServerNextButton.Visibility = Visibility.Collapsed;
@@ -39,7 +49,7 @@ public partial class SetupWindow : FluentWindow {
             return;
         }
 
-        ServerConnectButton.IsEnabled = false;
+        PendingRequest(true);
         StatusText.Text = $"Connecting to {serverUri!.Host}...";
         StatusText.Foreground = Brushes.Gray;
 
@@ -98,157 +108,202 @@ public partial class SetupWindow : FluentWindow {
             StatusText.Foreground = Brushes.Red;
         }
         finally {
-            ServerConnectButton.IsEnabled = true;
+            PendingRequest(false);
         }
     }
 
     private async void HubConnectButton_Click(object sender, RoutedEventArgs e) {
+        if (_isPendingRequest) return;
         string hubId = HubIdBox.Text.Trim();
-
-        HubNextButton.Visibility = Visibility.Collapsed;
-
-        // A new Hub must be verified before its PC assignment can be trusted.
         ResetAfterHubChange();
-
         if (string.IsNullOrWhiteSpace(hubId)) {
-            HubStatusText.Text = "Enter your Hub ID to continue.";
-            HubStatusText.Foreground = Brushes.Red;
+            ShowHubError("Enter the Hub ID provided by your administrator.");
             return;
         }
-
         if (_apiClient == null) {
-            HubStatusText.Text = "Connect to the KAGE server before checking a Hub ID.";
-            HubStatusText.Foreground = Brushes.Red;
+            ShowHubError("Connect to the KAGE server before checking a Hub ID.");
             return;
         }
+        await LoadAvailablePcsAsync(hubId, refreshing: false);
+    }
 
-        HubConnectButton.IsEnabled = false;
-        HubStatusText.Text = "Checking Hub ID...";
+    private async void RefreshAvailablePcsButton_Click(object sender, RoutedEventArgs e) {
+        if (_isPendingRequest || _apiClient == null || string.IsNullOrWhiteSpace(_hubId)) return;
+        await LoadAvailablePcsAsync(_hubId, refreshing: true);
+    }
+
+    private async Task LoadAvailablePcsAsync(string hubId, bool refreshing) {
+        string? previousSelection = AvailablePcsList.SelectedItem as string;
+        PendingRequest(true);
+        ResetAfterPcChange();
+        HubNextButton.Visibility = Visibility.Collapsed;
+        PcNavigationButton.IsEnabled = false;
+        HubStatusText.Text = refreshing ? "Refreshing available PCs..." : "Checking Hub ID...";
         HubStatusText.Foreground = Brushes.Gray;
-
+        PcStatusText.Text = HubStatusText.Text;
+        PcStatusText.Foreground = Brushes.Gray;
         try {
-            KAGELockResponse? result = await _apiClient.apiFetch($"/setup/hub/{hubId}/check", HttpMethod.Get);
-
-            // Check for null response
-            if (result == null) {
-                HubStatusText.Text = "The server returned a corrupted response.";
-                HubStatusText.Foreground = Brushes.Red;
+            KAGELockResponse? result = await _apiClient!.apiFetch(
+                $"/setup/hub/{Uri.EscapeDataString(hubId)}/check", HttpMethod.Get);
+            if (!TryReadAvailablePcs(result, out string[] pcs, out string message)) {
+                ShowHubError(message);
+                if (refreshing) NavigateTo(HubPage, HubNavigationButton);
                 return;
             }
-
-            // Check availability of the hub
-            if (result.data.TryGetProperty("available", out JsonElement keyElement)) {
-                bool available = keyElement.GetBoolean();
-                if (!available) {
-                    HubStatusText.Text = result.detail?.message ?? $"Hub ID {hubId} is not available.";
-                    HubStatusText.Foreground = Brushes.Red;
-                    return;
-                }
-            } else { // not necessary but just in case the server returns a different response structure during development
-                HubStatusText.Text = "The server returned an unexpected response.";
-                HubStatusText.Foreground = Brushes.Red;
-                return;
-            }
-
-            // Save
             _hubId = hubId;
-
-            HubStatusText.Text = result?.detail?.message ?? $"Hub ID {hubId} is valid.";
+            SetAvailablePcs(pcs, previousSelection);
+            HubStatusText.Text = $"{result?.detail?.message ?? "Hub verified."} {pcs.Length} PC(s) available.";
             HubStatusText.Foreground = Brushes.LimeGreen;
             HubNextButton.Visibility = Visibility.Visible;
-            HubNextButton.Appearance = ControlAppearance.Primary;
             PcNavigationButton.IsEnabled = true;
-
+            PcStatusText.Text = refreshing && previousSelection != null && AvailablePcsList.SelectedItem == null
+                ? "The previously selected PC is no longer available. Choose another PC."
+                : refreshing ? "PC list refreshed. Select a PC and verify it to continue."
+                : "Select the PC assigned to this computer by your administrator.";
+            PcStatusText.Foreground = Brushes.Gray;
         }
         catch (TaskCanceledException) {
-            HubStatusText.Text = "The Hub ID check timed out. Try again.";
-            HubStatusText.Foreground = Brushes.Red;
+            ShowHubError("The Hub ID check timed out. Try again.");
         }
         catch (HttpRequestException ex) {
-            HubStatusText.Text = $"Could not check the Hub ID: {ex.Message}";
-            HubStatusText.Foreground = Brushes.Red;
+            ShowHubError($"Could not load available PCs: {ex.Message}");
         }
         catch (JsonException) {
-            HubStatusText.Text = "The server returned an invalid response.";
-            HubStatusText.Foreground = Brushes.Red;
+            ShowHubError("The server returned an invalid response.");
         }
         catch (Exception ex) {
-            HubStatusText.Text = $"Unexpected error: {ex.Message}";
-            HubStatusText.Foreground = Brushes.Red;
+            ShowHubError($"Could not load available PCs: {ex.Message}");
         }
         finally {
-            HubConnectButton.IsEnabled = true;
+            PendingRequest(false);
         }
     }
 
-    private async void PcConnectButton_Click(object sender, RoutedEventArgs e) {
-        string pcId = PcIdBox.Text.Trim();
+    private static bool TryReadAvailablePcs(KAGELockResponse? result, out string[] pcs, out string message) {
+        pcs = [];
+        message = "The server returned an invalid Hub response. Try again.";
+        if (result == null) return false;
+        // Invalid hubs can return a string ("False") instead of an object.
+        if (!string.Equals(result.detail?.code, "SUCCESS", StringComparison.OrdinalIgnoreCase)) {
+            message = result.detail?.message ?? "This Hub is not available. Check the ID with your administrator.";
+            return false;
+        }
+        if (result.data.ValueKind != JsonValueKind.Object ||
+            !result.data.TryGetProperty("available", out JsonElement available) ||
+            (available.ValueKind != JsonValueKind.True && available.ValueKind != JsonValueKind.False)) return false;
+        if (!available.GetBoolean()) {
+            message = result.detail?.message ?? "This Hub is not available. Check the ID with your administrator.";
+            return false;
+        }
+        if (!result.data.TryGetProperty("available_pcs", out JsonElement list) || list.ValueKind != JsonValueKind.Array) return false;
+        pcs = list.EnumerateArray()
+            .Where(pc => pc.ValueKind == JsonValueKind.String)
+            .Select(pc => pc.GetString()!)
+            .Where(pc => !string.IsNullOrWhiteSpace(pc))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        if (pcs.Length == 0) {
+            message = "This Hub has no available PCs. Ask your administrator to add or make a PC available, then check again.";
+            return false;
+        }
+        return true;
+    }
 
-        PcNextButton.Visibility = Visibility.Collapsed;
-
-        // A new PC ID invalidates the enrollment summary until it is verified.
+    private void ShowHubError(string message) {
+        SetAvailablePcs([], null);
         ResetAfterPcChange();
+        HubNextButton.Visibility = Visibility.Collapsed;
+        PcNavigationButton.IsEnabled = false;
+        HubStatusText.Text = message;
+        HubStatusText.Foreground = Brushes.Red;
+        PcStatusText.Text = message;
+        PcStatusText.Foreground = Brushes.Red;
+    }
 
-        if (string.IsNullOrWhiteSpace(pcId)) {
-            PcStatusText.Text = "Enter your PC ID to continue.";
-            PcStatusText.Foreground = Brushes.Red;
-            return;
-        }
+    private void SetAvailablePcs(string[] pcs, string? selectedPc) {
+        _availablePcs = pcs;
+        AvailablePcsList.ItemsSource = pcs;
+        AvailablePcsList.SelectedItem = selectedPc != null && pcs.Contains(selectedPc, StringComparer.Ordinal)
+            ? selectedPc : null;
+        AvailablePcsCountText.Text = $"{pcs.Length} AVAILABLE";
+        UpdatePcActions();
+    }
 
-        if (_apiClient == null || string.IsNullOrWhiteSpace(_hubId)) {
-            PcStatusText.Text = "Connect to the KAGE server and check a Hub ID before checking a PC ID.";
-            PcStatusText.Foreground = Brushes.Red;
-            return;
-        }
+    private bool HasAvailableSelection() => AvailablePcsList.SelectedItem is string selectedPc &&
+        _availablePcs.Contains(selectedPc, StringComparer.Ordinal);
 
-        PcConnectButton.IsEnabled = false;
-        PcStatusText.Text = "Checking PC ID...";
+    private void AvailablePcsList_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e) {
+        ResetAfterPcChange();
+        PcStatusText.Text = HasAvailableSelection() ? "Verify the selected PC to continue." : "Select an available PC to continue.";
         PcStatusText.Foreground = Brushes.Gray;
+        UpdatePcActions();
+    }
 
+    private void UpdatePcActions() {
+        PcConnectButton.IsEnabled = !_isPendingRequest && HasAvailableSelection();
+        RefreshAvailablePcsButton.IsEnabled = !_isPendingRequest && _apiClient != null && _hubId != null;
+    }
+
+    private void PendingRequest(bool isPending) {
+        _isPendingRequest = isPending;
+        NavigationGrid.IsEnabled = !isPending;
+        ServerAddressBox.IsEnabled = !isPending;
+        HubIdBox.IsEnabled = !isPending;
+        ServerConnectButton.IsEnabled = !isPending;
+        HubConnectButton.IsEnabled = !isPending;
+        ServerNextButton.IsEnabled = !isPending;
+        HubNextButton.IsEnabled = !isPending;
+        PcNextButton.IsEnabled = !isPending;
+        AvailablePcsList.IsEnabled = !isPending;
+        RefreshAvailablePcsButton.Content = isPending ? "PLEASE WAIT..." : "↻ REFRESH";
+        UpdatePcActions();
+    }
+
+    private async void PcConnectButton_Click(object sender, RoutedEventArgs e) {
+        if (_isPendingRequest) return;
+        ResetAfterPcChange();
+        if (!HasAvailableSelection()) {
+            PcStatusText.Text = "Select a PC from the current available list before continuing.";
+            PcStatusText.Foreground = Brushes.Red;
+            return;
+        }
+        if (_apiClient == null || string.IsNullOrWhiteSpace(_hubId)) {
+            PcStatusText.Text = "Connect to the server and verify a Hub before selecting a PC.";
+            PcStatusText.Foreground = Brushes.Red;
+            return;
+        }
+        string pcId = (string)AvailablePcsList.SelectedItem;
+        PendingRequest(true);
+        PcStatusText.Text = "Verifying selected PC...";
+        PcStatusText.Foreground = Brushes.Gray;
         try {
-            KAGELockResponse? result = await _apiClient.apiFetch($"/setup/hub/{_hubId}/pc/{pcId}/check", HttpMethod.Get);
-
-            // Check for null response
-            if (result == null) {
-                PcStatusText.Text = "The server returned a corrupted response.";
+            KAGELockResponse? result = await _apiClient.apiFetch(
+                $"/setup/hub/{Uri.EscapeDataString(_hubId)}/pc/{Uri.EscapeDataString(pcId)}/check", HttpMethod.Get);
+            if (result == null || result.data.ValueKind != JsonValueKind.Object ||
+                !result.data.TryGetProperty("available", out JsonElement available) ||
+                available.ValueKind != JsonValueKind.True ||
+                !string.Equals(result.detail?.code, "SUCCESS", StringComparison.OrdinalIgnoreCase)) {
+                PcStatusText.Text = result?.detail?.message ?? "This PC is not available. Refresh the list and choose an available PC.";
                 PcStatusText.Foreground = Brushes.Red;
                 return;
             }
-
-            // Check availability of the PC ID
-            if (result.data.TryGetProperty("available", out JsonElement keyElement)) {
-                bool available = keyElement.GetBoolean();
-                if (!available) {
-                    PcStatusText.Text = result.detail?.message ?? $"PC ID {pcId} is not available.";
-                    PcStatusText.Foreground = Brushes.Red;
-                    return;
-                }
-            } else { // not necessary but just in case the server returns a different response structure during development
-                PcStatusText.Text = "The server returned an unexpected response.";
-                PcStatusText.Foreground = Brushes.Red;
-                return;
-            }
-
-            // Save
+            // Only a selection still present in the current list may reach registration.
+            if (!HasAvailableSelection() || (string)AvailablePcsList.SelectedItem != pcId) return;
             _pcId = pcId;
-
-            PcStatusText.Text = result?.detail?.message ?? $"PC ID {pcId} is valid.";
+            PcStatusText.Text = result.detail?.message ?? $"PC {pcId} is available.";
             PcStatusText.Foreground = Brushes.LimeGreen;
             PcNextButton.Visibility = Visibility.Visible;
-            PcNextButton.Appearance = ControlAppearance.Primary;
             FinishNavigationButton.IsEnabled = true;
-
             FinishServerText.Text = _serverAddress ?? "Unknown";
-            FinishHubText.Text = _hubId ?? "Unknown";
-            FinishPcText.Text = _pcId ?? "Unknown";
-
+            FinishHubText.Text = _hubId;
+            FinishPcText.Text = _pcId;
         }
         catch (TaskCanceledException) {
-            PcStatusText.Text = "The PC ID check timed out. Try again.";
+            PcStatusText.Text = "The PC check timed out. Try again.";
             PcStatusText.Foreground = Brushes.Red;
         }
         catch (HttpRequestException ex) {
-            PcStatusText.Text = $"Could not check the PC ID: {ex.Message}";
+            PcStatusText.Text = $"Could not verify the PC: {ex.Message}";
             PcStatusText.Foreground = Brushes.Red;
         }
         catch (JsonException) {
@@ -256,13 +311,14 @@ public partial class SetupWindow : FluentWindow {
             PcStatusText.Foreground = Brushes.Red;
         }
         catch (Exception ex) {
-            PcStatusText.Text = $"Unexpected error: {ex.Message}";
+            PcStatusText.Text = $"Could not verify the PC: {ex.Message}";
             PcStatusText.Foreground = Brushes.Red;
         }
         finally {
-            PcConnectButton.IsEnabled = true;
+            PendingRequest(false);
         }
     }
+
 
     private void ResetAfterServerChange() {
         _apiClient = null;
@@ -278,10 +334,14 @@ public partial class SetupWindow : FluentWindow {
 
     private void ResetAfterHubChange() {
         _hubId = null;
+        HubNextButton.Visibility = Visibility.Collapsed;
+        HubStatusText.Text = "Awaiting Hub ID";
+        HubStatusText.Foreground = Brushes.Gray;
+        SetAvailablePcs([], null);
 
         PcNavigationButton.IsEnabled = false;
         PcNextButton.Visibility = Visibility.Collapsed;
-        PcStatusText.Text = "Awaiting PC ID";
+        PcStatusText.Text = "Select an available PC to continue.";
         PcStatusText.Foreground = Brushes.Gray;
 
         ResetAfterPcChange();
@@ -289,6 +349,7 @@ public partial class SetupWindow : FluentWindow {
 
     private void ResetAfterPcChange() {
         _pcId = null;
+        PcNextButton.Visibility = Visibility.Collapsed;
         FinishNavigationButton.IsEnabled = false;
         FinishStatusText.Text = string.Empty;
         FinishStatusText.Foreground = Brushes.Gray;
@@ -301,13 +362,16 @@ public partial class SetupWindow : FluentWindow {
 
 
     private async void RegisterPcButton_Click(object sender, RoutedEventArgs e) {
-        if (_apiClient == null || string.IsNullOrWhiteSpace(_hubId) || string.IsNullOrWhiteSpace(_pcId)) {
+        if (_isPendingRequest) return;
+        if (_apiClient == null || string.IsNullOrWhiteSpace(_hubId) || string.IsNullOrWhiteSpace(_pcId) ||
+            !HasAvailableSelection() || !string.Equals(AvailablePcsList.SelectedItem as string, _pcId, StringComparison.Ordinal)) {
             FinishStatusText.Text = "Connect to the KAGE server and verify a Hub ID and PC ID before registering.";
             FinishStatusText.Foreground = Brushes.Red;
             FinishStatusText.Visibility = Visibility.Visible;
             return;
         }
 
+        PendingRequest(true);
         RegisterPcButton.IsEnabled = false;
 
         FinishStatusText.Text = "Registering this PC...";
@@ -315,7 +379,7 @@ public partial class SetupWindow : FluentWindow {
         FinishStatusText.Visibility = Visibility.Visible;
 
         try {
-            KAGELockResponse? result = await _apiClient.apiFetch($"/setup/hub/{_hubId}/pc/{_pcId}/register", HttpMethod.Get);
+            KAGELockResponse? result = await _apiClient.apiFetch($"/setup/hub/{Uri.EscapeDataString(_hubId)}/pc/{Uri.EscapeDataString(_pcId)}/register", HttpMethod.Get);
 
             // Check for null response
             if (result == null) {
@@ -351,20 +415,51 @@ public partial class SetupWindow : FluentWindow {
             NavigationGrid.Visibility = Visibility.Collapsed;
             RegisterPcButton.Visibility = Visibility.Collapsed;
 
-            // Save the configuration to a file
-            ClientConfig config = new ClientConfig
-            {
-                ServerAddress = _serverAddress ?? "",
-                HubId = _hubId ?? "",
-                PcId = _pcId ?? "",
-            };
+            // extract MQTT configuration from the server response
+            if (result.data.TryGetProperty("mqtt", out JsonElement mqttElement)) {
+                MqttConfig mqttConfig = new MqttConfig();
 
-            await ConfigService.SaveAsync(config);
+                if (mqttElement.TryGetProperty("address", out JsonElement addressElement)) {
+                    mqttConfig.Address = addressElement.GetString() ?? "";
+                }
 
-            // Switch to the main application window
-            MainWindow mainWindow = new MainWindow(config);
-            mainWindow.Show();
-            Close();
+                if (mqttElement.TryGetProperty("port", out JsonElement portElement)) {
+                    mqttConfig.Port = portElement.GetInt32();
+                }
+
+                if (mqttElement.TryGetProperty("use_tls", out JsonElement useTlsElement)) {
+                    mqttConfig.UseTls = useTlsElement.GetBoolean();
+                }
+
+                if (mqttElement.TryGetProperty("username", out JsonElement usernameElement)) {
+                    mqttConfig.Username = usernameElement.GetString() ?? "";
+                }
+
+                if (mqttElement.TryGetProperty("password", out JsonElement passwordElement)) {
+                    mqttConfig.Password = passwordElement.GetString() ?? "";
+                }
+
+                // Save the configuration to a local file
+                ClientConfig config = new ClientConfig
+                {
+                    ServerAddress = _serverAddress ?? "",
+                    HubId = _hubId ?? "",
+                    PcId = _pcId ?? "",
+                    Mqtt = mqttConfig
+                };
+
+                await ConfigService.SaveAsync(config);
+
+                // Switch to the main application window
+                MainWindow mainWindow = new MainWindow(config);
+                mainWindow.Show();
+                Close();
+
+            } else {
+                FinishStatusText.Text = "The server did not provide MQTT configuration.";
+                FinishStatusText.Foreground = Brushes.Red;
+                return;
+            }
 
         }
         catch (TaskCanceledException) {
@@ -385,6 +480,7 @@ public partial class SetupWindow : FluentWindow {
         }
         finally {
             RegisterPcButton.IsEnabled = true;
+            PendingRequest(false);
         }
     }
 
@@ -424,7 +520,7 @@ public partial class SetupWindow : FluentWindow {
 
     private void HubNextButton_Click(object sender, RoutedEventArgs e) {
         NavigateTo(PcPage, PcNavigationButton);
-        PcIdBox.Focus();
+        AvailablePcsList.Focus();
     }
 
     private void PcNextButton_Click(object sender, RoutedEventArgs e) {
@@ -444,7 +540,7 @@ public partial class SetupWindow : FluentWindow {
 
     private void PcNavigationButton_Click(object sender, RoutedEventArgs e) {
         NavigateTo(PcPage, PcNavigationButton);
-        PcIdBox.Focus();
+        AvailablePcsList.Focus();
     }
 
     private void FinishNavigationButton_Click(object sender, RoutedEventArgs e) {

@@ -24,7 +24,7 @@ public partial class CommandManager : IDisposable {
     public bool IsLogout => _ongoingCommand?.Command.Trim().EndsWith("logout", StringComparison.OrdinalIgnoreCase) == true;
     public bool IsExtensionActive => _ongoingCommand?.ExtensionActive == true;
     public bool IsRequestPending => _requestCancellation != null;
-    public bool CanExtend => _ongoingCommand != null && !IsForced && _ongoingCommand.AllowExtension != false && !IsRequestPending;
+    public bool CanExtend => _ongoingCommand != null && !IsForced && _ongoingCommand.AllowExtension == true && !IsRequestPending;
     public bool CanCancelExtension => IsExtensionActive && !IsForced && _ongoingCommand?.AllowCancellation != false;
     public string InteractionMessage { get; private set; } = "";
     public int SecondsRemaining => (int)Math.Min(int.MaxValue, Math.Ceiling(Math.Max(0,
@@ -63,7 +63,7 @@ public partial class CommandManager : IDisposable {
             SetInteractionMessage("Choose an extension of 1, 2, 5 or 10 minutes.");
             return;
         }
-        if (_api == null || _config == null) {
+        if (_config == null || (cancel ? _api == null : _mqttClient == null)) {
             SetInteractionMessage("Server connection is unavailable. The countdown is still active.");
             return;
         }
@@ -74,10 +74,23 @@ public partial class CommandManager : IDisposable {
         SetInteractionMessage(cancel ? "Checking assigned chair presence…" : "Requesting extension…");
 
         try {
+            // Publishing only requests an extension. The updated MQTT command owns the deadline.
+            if (!cancel) {
+                if (!IsCurrentRequest(requestedCommand, request)) return;
+                await _mqttClient!.PublishAsync($"kage/client/{_config.HubId}/{_config.PcId}/extension/request",
+                    JsonSerializer.Serialize(new {
+                        command = requestedCommand.Command,
+                        requested_seconds = minutes * 60
+                    }), request.Token);
+                if (IsCurrentRequest(requestedCommand, request))
+                    SetInteractionMessage("Extension requested. Waiting for server approval; the countdown is still active.");
+                return;
+            }
+
             // Recheck presence over HTTP; a cached occupied state may predate a disconnect.
             if (cancel) {
                 long stateVersion = _stateVersion;
-                KAGELockResponse? stateResult = await _api.apiFetch("/client/state", HttpMethod.Post, new {
+                KAGELockResponse? stateResult = await _api!.apiFetch("/client/state", HttpMethod.Post, new {
                     hub_id = _config.HubId, pc_id = _config.PcId
                 }, request.Token);
                 if (!IsCurrentRequest(requestedCommand, request)) return;
@@ -95,8 +108,8 @@ public partial class CommandManager : IDisposable {
             }
 
             // These requests never change the local timer. Only an approved command does.
-            KAGELockResponse? result = await _api.apiFetch(
-                cancel ? "/client/cancel-extension" : "/client/extend", HttpMethod.Post, new {
+            KAGELockResponse? result = await _api!.apiFetch(
+                "/client/cancel-extension", HttpMethod.Post, new {
                     hub_id = _config.HubId,
                     pc_id = _config.PcId,
                     command = requestedCommand.Command,
@@ -138,6 +151,11 @@ public partial class CommandManager : IDisposable {
         catch (JsonException) {
             if (IsCurrentRequest(requestedCommand, request)) SetInteractionMessage("Invalid server response. The countdown is still active.");
         }
+        catch (Exception ex) when (!cancel) {
+            Trace.WriteLine($"MQTT extension request failed: {ex.Message}");
+            if (IsCurrentRequest(requestedCommand, request))
+                SetInteractionMessage("Could not send the extension request. The countdown is still active.");
+        }
         finally {
             if (ReferenceEquals(_requestCancellation, request)) {
                 _requestCancellation = null;
@@ -158,7 +176,7 @@ public partial class CommandManager : IDisposable {
 
     private bool IsCurrentRequest(ClientCommandData command, CancellationTokenSource request) {
         if (_disposed || !ReferenceEquals(_ongoingCommand, command) || !ReferenceEquals(_requestCancellation, request)) return false;
-        // HTTP continuations may run before the next 250 ms timer tick.
+        // Request continuations may run before the next 250 ms timer tick.
         if (_commandStopwatch != null && _commandStopwatch.Elapsed >= _commandDuration) {
             CompleteCommand();
             return false;

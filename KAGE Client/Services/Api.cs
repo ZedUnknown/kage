@@ -12,7 +12,7 @@ public class Api {
 
     // Constructor
     public Api(string serverAddress) {
-        API_BASE_URL = serverAddress.TrimEnd('/') + "/kage";
+        API_BASE_URL = serverAddress.TrimEnd('/') + "/api";
     }
 
     public virtual async Task<KAGELockResponse?> apiFetch(string endpoint, HttpMethod method, object? body = null, CancellationToken cancellationToken = default) {

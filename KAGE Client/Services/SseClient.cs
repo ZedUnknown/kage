@@ -1,3 +1,9 @@
+/*
+ * [DEPRECATED]
+ * SSE is no longer used in the KAGE Client. The client now uses MQTT for communication with the server.
+ * This class is kept for reference.
+*/
+
 using KAGE_Client.Models;
 using System.Diagnostics;
 using System.IO;

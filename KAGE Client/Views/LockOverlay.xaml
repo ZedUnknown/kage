@@ -4,7 +4,7 @@
                  xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
                  Title="KAGELOCK / Security action"
                  WindowStyle="None" ResizeMode="NoResize" ShowInTaskbar="False"
-                 Topmost="False" WindowStartupLocation="Manual"
+                 Topmost="True" WindowStartupLocation="Manual"
                  ExtendsContentIntoTitleBar="True" Background="Transparent"
                  Foreground="#F4F2F0" FontFamily="/KAGE_Client;component/Assets/Fonts/#Rajdhani">
     <ui:FluentWindow.Resources>

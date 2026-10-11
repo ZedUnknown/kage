@@ -145,7 +145,7 @@
             <Setter Property="BorderBrush" Value="#E62B37"/>
             <Setter Property="FontFamily" Value="{StaticResource ArameFont}"/>
             <Setter Property="FontSize" Value="12"/>
-            <Setter Property="FontWeight" Value="Bold"/>
+            <!-- <Setter Property="FontWeight" Value=""/> -->
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="MinHeight" Value="44"/>
             <Setter Property="Padding" Value="18,12"/>
@@ -222,18 +222,55 @@
             </Style.Triggers>
         </Style>
         <Style x:Key="PcAction" TargetType="ui:Button" BasedOn="{StaticResource ActionButton}">
-            <Setter Property="Content" Value="CHECK AVAILABILITY"/>
+            <Setter Property="Content" Value="VERIFY SELECTED PC"/>
             <Style.Triggers>
                 <DataTrigger Binding="{Binding Visibility, ElementName=PcNextButton}" Value="Visible">
-                    <Setter Property="Content" Value="PC ID AVAILABLE / CHECK AGAIN"/>
+                    <Setter Property="Content" Value="PC VERIFIED / CHECK AGAIN"/>
                     <Setter Property="Background" Value="#173C2B"/>
                     <Setter Property="BorderBrush" Value="#2B6041"/>
                     <Setter Property="Foreground" Value="{StaticResource SetupGreen}"/>
                 </DataTrigger>
-                <Trigger Property="IsEnabled" Value="False">
-                    <Setter Property="Content" Value="CHECKING AVAILABILITY..."/>
-                </Trigger>
             </Style.Triggers>
+        </Style>
+        <Style x:Key="PcChoice" TargetType="ListBoxItem">
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Foreground" Value="#F4F2F0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Margin" Value="0,0,0,6"/>
+            <Setter Property="AutomationProperties.Name" Value="{Binding}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="ChoiceBorder" Background="#1B1B1E" BorderBrush="{StaticResource SetupLine}" BorderThickness="1" Padding="14,12">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="18"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Ellipse Width="16" Height="16" Stroke="#A49C9D" StrokeThickness="1" VerticalAlignment="Center"/>
+                                <Ellipse x:Name="ChoiceDot" Width="8" Height="8" Fill="{StaticResource SetupRed}" Visibility="Collapsed" VerticalAlignment="Center"/>
+                                <TextBlock Grid.Column="1" Text="{Binding}" Margin="12,0,0,0" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ChoiceBorder" Property="Background" Value="#252126"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="ChoiceBorder" Property="Background" Value="#301A20"/>
+                                <Setter TargetName="ChoiceBorder" Property="BorderBrush" Value="{StaticResource SetupRed}"/>
+                                <Setter TargetName="ChoiceDot" Property="Visibility" Value="Visible"/>
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                                <Setter TargetName="ChoiceBorder" Property="BorderBrush" Value="#F4F2F0"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.5"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
     </ui:FluentWindow.Resources>
     <Border Background="#101012" BorderBrush="#39373A" BorderThickness="1">
@@ -294,7 +331,7 @@
                             <RadioButton x:Name="PcNavigationButton" GroupName="SetupNavigation" Tag="03" Style="{StaticResource NavigationButtonStyle}" IsEnabled="False" Click="PcNavigationButton_Click">
                                 <StackPanel>
                                     <TextBlock Text="PC" FontSize="14" FontWeight="SemiBold"/>
-                                    <TextBlock Text="Register this computer" FontSize="12" LineHeight="16" TextWrapping="Wrap" Foreground="{StaticResource SetupMuted}" Margin="0,5,0,0"/>
+                                    <TextBlock Text="Select an assigned PC" FontSize="12" LineHeight="16" TextWrapping="Wrap" Foreground="{StaticResource SetupMuted}" Margin="0,5,0,0"/>
                                 </StackPanel>
                             </RadioButton>
                             <RadioButton x:Name="FinishNavigationButton" GroupName="SetupNavigation" Tag="04" Style="{StaticResource NavigationButtonStyle}" IsEnabled="False" Click="FinishNavigationButton_Click">
@@ -333,11 +370,21 @@
                             </RadialGradientBrush>
                         </Rectangle.Fill>
                     </Rectangle>
-                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0" CanContentScroll="False">
-                        <Grid Margin="36,36,36,28" MaxWidth="1200" VerticalAlignment="Top">
+                    <ScrollViewer x:Name="SetupPageScrollViewer" HorizontalScrollBarVisibility="Disabled" Padding="0" CanContentScroll="False">
+                        <ScrollViewer.Style>
+                            <Style TargetType="ScrollViewer">
+                                <Setter Property="VerticalScrollBarVisibility" Value="Auto"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Visibility, ElementName=PcPage}" Value="Visible">
+                                        <Setter Property="VerticalScrollBarVisibility" Value="Disabled"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </ScrollViewer.Style>
+                        <Grid Margin="36,36,36,28" MaxWidth="1200">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
                             </Grid.RowDefinitions>
                             <Grid Margin="0,0,0,34">
                                 <Grid.ColumnDefinitions>
@@ -360,7 +407,7 @@
                                                                 <Setter Property="Text" Value="HUB VERIFICATION"/>
                                                             </DataTrigger>
                                                             <DataTrigger Binding="{Binding Visibility, ElementName=PcPage}" Value="Visible">
-                                                                <Setter Property="Text" Value="PC REGISTRATION"/>
+                                                                <Setter Property="Text" Value="PC SELECTION"/>
                                                             </DataTrigger>
                                                             <DataTrigger Binding="{Binding Visibility, ElementName=FinishPage}" Value="Visible">
                                                                 <Setter Property="Text" Value="DEVICE REGISTRATION"/>
@@ -469,7 +516,7 @@
                                     <StackPanel x:Name="HubPage" VerticalAlignment="Top" Visibility="Collapsed">
                                         <TextBlock Text="02 / VERIFY ASSIGNED HUB" Style="{StaticResource TechnicalLabel}" Foreground="{StaticResource SetupRed}"/>
                                         <TextBlock Text="Connect your Hub" Style="{StaticResource PageTitle}"/>
-                                        <TextBlock Text="Enter the Hub ID assigned to your workspace." Style="{StaticResource PageDescription}"/>
+                                        <TextBlock Text="Enter the Hub ID created by your administrator to find the PCs available for this workspace." Style="{StaticResource PageDescription}"/>
                                         <Border Background="#151517" BorderBrush="{StaticResource SetupLine}" BorderThickness="1">
                                             <Grid>
                                                 <Border Height="3" Width="68" Background="{StaticResource SetupRed}" HorizontalAlignment="Left" VerticalAlignment="Top"/>
@@ -497,37 +544,46 @@
                                             <TextBlock Text="KAGE / HUB" Style="{StaticResource TechnicalLabel}" FontSize="11" HorizontalAlignment="Right"/>
                                         </DockPanel>
                                     </StackPanel>
-                                    <StackPanel x:Name="PcPage" VerticalAlignment="Top" Visibility="Collapsed">
-                                        <TextBlock Text="03 / DEVICE REGISTRATION" Style="{StaticResource TechnicalLabel}" Foreground="{StaticResource SetupRed}"/>
-                                        <TextBlock Text="Choose a PC ID" Style="{StaticResource PageTitle}"/>
-                                        <TextBlock Text="Enter a unique ID for this computer and check whether it is available on the selected KAGE Hub." Style="{StaticResource PageDescription}"/>
-                                        <Border Background="#151517" BorderBrush="{StaticResource SetupLine}" BorderThickness="1">
+                                    <Grid x:Name="PcPage" Visibility="Collapsed">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="*"/>
+                                        </Grid.RowDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="03 / SELECT ASSIGNED PC" Style="{StaticResource TechnicalLabel}" Foreground="{StaticResource SetupRed}"/>
+                                            <TextBlock Text="Choose your PC" Style="{StaticResource PageTitle}"/>
+                                            <TextBlock Text="Select a PC registered by your administrator. Refresh to see changes made during setup." Style="{StaticResource PageDescription}" Margin="0,0,0,16"/>
+                                        </StackPanel>
+                                        <Border Grid.Row="1" Background="#151517" BorderBrush="{StaticResource SetupLine}" BorderThickness="1">
                                             <Grid>
                                                 <Border Height="3" Width="68" Background="{StaticResource SetupRed}" HorizontalAlignment="Left" VerticalAlignment="Top"/>
-                                                <StackPanel Margin="24,26,24,24">
-                                                    <DockPanel Margin="0,0,0,24">
-                                                        <ui:SymbolIcon Symbol="Desktop24" FontSize="19" Margin="0,0,10,0"/>
-                                                        <TextBlock Text="PC ID availability" FontSize="17" FontWeight="SemiBold"/>
+                                                <Grid Margin="20,20,20,18">
+                                                    <Grid.RowDefinitions>
+                                                        <RowDefinition Height="Auto"/>
+                                                        <RowDefinition Height="*"/>
+                                                        <RowDefinition Height="Auto"/>
+                                                    </Grid.RowDefinitions>
+                                                    <DockPanel Margin="0,0,0,14" LastChildFill="True">
+                                                        <ui:Button x:Name="RefreshAvailablePcsButton" DockPanel.Dock="Right" Content="↻ REFRESH" Style="{StaticResource NextButton}" Margin="12,0,0,0" IsEnabled="False" Click="RefreshAvailablePcsButton_Click" AutomationProperties.Name="Refresh available PCs"/>
+                                                        <StackPanel VerticalAlignment="Center">
+                                                            <TextBlock Text="Available PCs" FontSize="17" FontWeight="SemiBold"/>
+                                                            <TextBlock x:Name="AvailablePcsCountText" Text="0 AVAILABLE" Style="{StaticResource TechnicalLabel}" FontSize="10" Margin="0,4,0,0"/>
+                                                        </StackPanel>
                                                     </DockPanel>
-                                                    <Label Content="PC ID" Target="{Binding ElementName=PcIdBox}" Padding="0" Margin="0,0,0,9" Foreground="#EAE7E7" FontSize="12"/>
-                                                    <TextBox x:Name="PcIdBox" Style="{StaticResource SetupInput}" Margin="0,0,0,14" AutomationProperties.Name="PC ID"/>
-                                                    <ui:Button x:Name="PcConnectButton" Style="{StaticResource PcAction}" Appearance="Primary" Click="PcConnectButton_Click"/>
-                                                    <Grid Margin="0,18,0,0">
-                                                        <Grid.ColumnDefinitions>
-                                                            <ColumnDefinition Width="Auto"/>
-                                                            <ColumnDefinition Width="*"/>
-                                                        </Grid.ColumnDefinitions>
-                                                        <Ellipse Width="6" Height="6" Fill="{Binding Foreground, ElementName=PcStatusText}" Margin="4,4,5,0" VerticalAlignment="Top"/>
-                                                        <TextBlock Grid.Column="1" x:Name="PcStatusText" Text="Awaiting PC ID" Style="{StaticResource StatusMessage}"/>
+                                                    <ListBox x:Name="AvailablePcsList" Grid.Row="1" SelectionMode="Single" Background="Transparent" BorderThickness="0" Padding="0,0,20,0" Margin="0,0,0,0" ItemContainerStyle="{StaticResource PcChoice}" ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.CanContentScroll="True" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" VirtualizingPanel.ScrollUnit="Pixel" SelectionChanged="AvailablePcsList_SelectionChanged" AutomationProperties.Name="Available PCs">
+                                                        <ListBox.ItemsPanel>
+                                                            <ItemsPanelTemplate><VirtualizingStackPanel/></ItemsPanelTemplate>
+                                                        </ListBox.ItemsPanel>
+                                                    </ListBox>
+                                                    <StackPanel Grid.Row="2" Margin="0,14,0,0">
+                                                        <ui:Button x:Name="PcConnectButton" Style="{StaticResource PcAction}" Appearance="Primary" IsEnabled="False" Click="PcConnectButton_Click"/>
+                                                        <TextBlock x:Name="PcStatusText" Text="Select an available PC to continue." Style="{StaticResource StatusMessage}" Margin="0,10,0,0"/>
+                                                        <ui:Button x:Name="PcNextButton" Content="NEXT / FINISH →" Style="{StaticResource NextButton}" Visibility="Collapsed" Click="PcNextButton_Click"/>
+                                                    </StackPanel>
                                                     </Grid>
-                                                    <ui:Button x:Name="PcNextButton" Content="NEXT / FINISH →" Style="{StaticResource NextButton}" Visibility="Collapsed" Click="PcNextButton_Click"/>
-                                                </StackPanel>
                                             </Grid>
                                         </Border>
-                                        <DockPanel Margin="0,16,0,0">
-                                            <TextBlock Text="KAGE / PC" Style="{StaticResource TechnicalLabel}" FontSize="11" HorizontalAlignment="Right"/>
-                                        </DockPanel>
-                                    </StackPanel>
+                                    </Grid>
                                     <StackPanel x:Name="FinishPage" VerticalAlignment="Top" Visibility="Collapsed">
                                         <TextBlock Text="04 / COMPLETE REGISTRATION" Style="{StaticResource TechnicalLabel}" Foreground="{StaticResource SetupRed}"/>
                                         <TextBlock Text="Ready to finish setup" Style="{StaticResource PageTitle}"/>

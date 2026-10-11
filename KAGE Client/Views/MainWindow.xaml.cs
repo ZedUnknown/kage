@@ -70,10 +70,10 @@ public partial class MainWindow : FluentWindow, INotifyPropertyChanged {
     public bool CanRefresh => !_isChecking && !_isClosed;
 
 
-    // SSE Client
+    // MQTT Client
     private ClientStateData? _state;
-    private SseClient? _sseClient;
-    private CancellationTokenSource? _sseCancellation;
+    private readonly MqttClient _mqttClient;
+    private Task? _mqttTask;
 
 // ============================================================
 
@@ -89,8 +89,9 @@ public partial class MainWindow : FluentWindow, INotifyPropertyChanged {
         Api api = new(_config.ServerAddress);
 
         // Initialize the command manager and subscribe to its events
-        commandManager = new CommandManager(api, _config);
-        commandManager.StateChanged += CommandManager_StateChanged; // subscribe to state changes to show/hide the lock overlay
+        _mqttClient = new MqttClient(_config);
+        commandManager = new CommandManager(api, _config, _mqttClient);
+        commandManager.StateChanged += CommandManager_StateChanged; // command/countdown changes, independent of MQTT /state messages
         commandManager.ExecutionFailed += CommandManager_ExecutionFailed;
 
         // Subscribe to window events
@@ -133,22 +134,10 @@ public partial class MainWindow : FluentWindow, INotifyPropertyChanged {
         // Unsubscribe to prevent multiple calls if the window is reloaded
         Loaded -= MainWindow_Loaded;
 
-        // Overlay Simulation
-        DateTimeOffset now = DateTimeOffset.UtcNow;
-        commandManager.HandleCommand(new ClientCommandData {
-            Command = "auto_lock",
-            Message = "This is a mock command for testing purposes.",
-            DeadlineUtc = now.AddSeconds(5000),
-            ServerTimeUtc = now,
-            Priority = 10,
-            AllowExtension = true,
-            AllowCancellation = true
-        });
-
         await LoadStateAsync();
 
-        // Start SSE
-        if (!_isClosed) StartSse();
+        // Start MQTT after the initial HTTP state has been applied.
+        if (!_isClosed && _state != null) StartMqtt();
     }
 
     private void MainWindow_Closing(object? sender, CancelEventArgs e) {
@@ -194,9 +183,10 @@ public partial class MainWindow : FluentWindow, INotifyPropertyChanged {
         _trayIcon.MouseDoubleClick -= TrayIcon_MouseDoubleClick;
         _trayIcon.Dispose();
         _trayMenu.Dispose();
-        _sseCancellation?.Cancel();
-        _sseCancellation?.Dispose();
         _lifetime.Cancel();
+        // The listener uses background continuations so shutdown can finish disconnecting here.
+        _mqttTask?.GetAwaiter().GetResult();
+        _mqttClient.Dispose();
         _lifetime.Dispose();
     }
 
@@ -373,48 +363,53 @@ public partial class MainWindow : FluentWindow, INotifyPropertyChanged {
         }
     }
 
-    // [SSE]
-    private void StartSse() {
-        _sseCancellation =
-            new CancellationTokenSource();
+    // [MQTT]
+    private void StartMqtt() {
+        if (_mqttTask != null) return;
 
-        _sseClient =
-            new SseClient();
-
-        _ = RunSseAsync(
-            _sseCancellation.Token
-        );
+        RequestType = "MQTT";
+        UpdateBindings();
+        CancellationToken cancellationToken = _lifetime.Token;
+        _mqttTask = Task.Run(() => RunMqttAsync(cancellationToken));
     }
 
-    private async Task RunSseAsync(CancellationToken cancellationToken) {
-        if (_sseClient == null)
-            return;
-
-        RequestType = "SSE STREAM";
-
+    private async Task RunMqttAsync(CancellationToken cancellationToken) {
         try {
-            await _sseClient.ListenAsync(
-                serverAddress: ServerAddress,
-                hubId: _config.HubId,
-                pcId: _config.PcId,
+            await _mqttClient.ListenAsync(
                 onStateReceived: state => {
-                    Dispatcher.Invoke(() => ApplyState(state));
+                    Dispatcher.BeginInvoke(new Action(() => ApplyState(state)));
                 },
                 onCommandReceived: command => {
-                    Dispatcher.Invoke(() => commandManager.HandleCommand(command));
-
+                    Dispatcher.BeginInvoke(new Action(() => {
+                        if (!_isClosed) commandManager.HandleCommand(command);
+                    }));
+                },
+                onConnectionChanged: connected => {
+                    Dispatcher.BeginInvoke(new Action(() => {
+                        if (_isClosed) return;
+                        if (connected) {
+                            SetServerStatus("Connected", "MQTT realtime connected", _accentBrush);
+                        } else {
+                            commandManager.UpdateClientState(null);
+                            SetServerStatus("Disconnected", "MQTT disconnected. Retrying…", _waitingBrush);
+                            // TODO: OfflineRecoveryManager (2FA like) recovery code between server and each hub after a prolonged network outage.
+                        }
+                        UpdateBindings();
+                    }));
                 },
                 cancellationToken
-            );
+            ).ConfigureAwait(false);
         }
         catch (OperationCanceledException) {
-            Trace.WriteLine("SSE stopped");
+            Trace.WriteLine("MQTT stopped");
         }
         catch (Exception ex) {
-            Trace.WriteLine($"SSE ERROR: {ex.Message}");
-        }
-        finally {
-            if (!_isClosed) commandManager.UpdateClientState(null);
+            Trace.WriteLine($"MQTT ERROR: {ex.Message}");
+            _ = Dispatcher.BeginInvoke(new Action(() => {
+                if (_isClosed) return;
+                SetServerStatus("Disconnected", "Could not start MQTT. Check the MQTT configuration and certificate.", _waitingBrush);
+                UpdateBindings();
+            }));
         }
     }
 
@@ -423,11 +418,13 @@ public partial class MainWindow : FluentWindow, INotifyPropertyChanged {
         // opens the overlay when a command exists
         if (_isClosed) return;
         if (commandManager.ActiveCommand == null) {
+            if (_lockOverlay != null) Trace.WriteLine("Closing command overlay: no active command.");
             _lockOverlay?.CloseForCommand();
             _lockOverlay = null;
         } else if (_lockOverlay == null) {
             _lockOverlay = new LockOverlay(commandManager);
             _lockOverlay.Show();
+            Trace.WriteLine($"Command overlay shown: {commandManager.ActiveCommand.Command}; visible={_lockOverlay.IsVisible}; topmost={_lockOverlay.Topmost}; bounds={_lockOverlay.Left},{_lockOverlay.Top},{_lockOverlay.ActualWidth},{_lockOverlay.ActualHeight}");
         }
     }
 

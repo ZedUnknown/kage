@@ -3,6 +3,9 @@
 #include <esp_now.h>
 #include <esp_wifi.h>
 #include <KageHNProtocol.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <singleLEDLibrary.h>
 
 // [Runtime Variables]
 bool startupComplete = false;
@@ -487,11 +490,34 @@ void startNode(String _HubMacAddress, String _HubWiFiChannel) {
 
 // ======================================================================
 
+sllib LED(0);
+
+TaskHandle_t ledTaskHandle = nullptr;
+void unInturuptedLoop(void* parameter) {
+    while (true) {
+        LED.update();
+        delay(1);
+    }
+}
+
 void setup() {
     Serial.begin(115200); // Serial communication at 115200 baud
     delay(3000); // Wait for Serial to initialize
 
     Serial.println("KAGE ESP32-C3 boot successful!");
+
+    // Initialize LED
+    int pattern[] = {300, 500};
+    LED.setPatternSingle(pattern, 2);
+
+    if (xTaskCreate(
+        unInturuptedLoop, // Task function
+        "LED Update Task", // Task name
+        1024,
+        NULL, // Task input parameter
+        1, // Task priority
+        &ledTaskHandle // Task handle
+    ) != pdPASS) Serial.println("Failed to create LED update task.");
 
     // [TESTING ONLY]
     clearPairedHub();
@@ -505,6 +531,19 @@ void setup() {
 
     // Setup ESP-NOW
     setupESPNow();
+
+    /* [Schrödinbug]
+        : SuperMini loses both broadcast and unicast at its default max power 20 dBm.
+        : Shows stable broadcasting at 8.5 dBm.
+        : Yah 8.5 dBm < 20 dBm, and it's magical, but it works. ¯\_(ツ)_/¯
+    */
+    esp_err_t powerError = esp_wifi_set_max_tx_power(34); // 34 × 0.25 dBm = 8.5 dBm
+    if (powerError != ESP_OK) {
+        Serial.println("Failed to configure node radio power. Restarting...");
+        ESP.restart();
+        return;
+    }
+
     Serial.println("Node MAC: " + WiFi.macAddress());
     delay(1000);
 
@@ -532,7 +571,6 @@ void setup() {
     }
 
     if (HubMacAddress != "" && HubWiFiChannel != "") startNode(HubMacAddress, HubWiFiChannel);
-
 };
 
 
@@ -548,6 +586,8 @@ void loop() {
 
     if (!isPaired && !isPendingRequest) {
         handlePairing();
+    } else {
+        LED.setOnSingle();
     }
 
     delay(1);

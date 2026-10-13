@@ -375,9 +375,9 @@ void setupESPNow() {
     Serial.println("       KAGE ESP-NOW       ");
     Serial.println("==========================");
 
+    WiFi.disconnect(true); // disconnect from any existing Wi-Fi network
     WiFi.mode(WIFI_STA); // connects to a router as a "client"
     WiFi.setSleep(false);
-    // Keep an existing Wi-Fi connection; the Hub also needs it for MQTT.
 
     receivedPackets = xQueueCreate(20, sizeof(ReceivedESPNowPacket));
     sendResults = xQueueCreate(1, sizeof(esp_now_send_status_t));

@@ -531,6 +531,19 @@ void setup() {
 
     // Setup ESP-NOW
     setupESPNow();
+
+    /* [Schrödinbug]
+        : SuperMini loses both broadcast and unicast at its default max power 20 dBm.
+        : Shows stable broadcasting at 8.5 dBm.
+        : Yah 8.5 dBm < 20 dBm, and it's magical, but it works. ¯\_(ツ)_/¯
+    */
+    esp_err_t powerError = esp_wifi_set_max_tx_power(34); // 34 × 0.25 dBm = 8.5 dBm
+    if (powerError != ESP_OK) {
+        Serial.println("Failed to configure node radio power. Restarting...");
+        ESP.restart();
+        return;
+    }
+
     Serial.println("Node MAC: " + WiFi.macAddress());
     delay(1000);
 
@@ -558,7 +571,6 @@ void setup() {
     }
 
     if (HubMacAddress != "" && HubWiFiChannel != "") startNode(HubMacAddress, HubWiFiChannel);
-
 };
 
 

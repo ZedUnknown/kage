@@ -3,9 +3,10 @@
 #include <esp_now.h>
 #include <esp_wifi.h>
 #include <KageHNProtocol.h>
+#include <KageNodeButton.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
-#include <singleLEDLibrary.h>
+#include <LEDStates.h>
 
 // [Runtime Variables]
 bool startupComplete = false;
@@ -488,17 +489,11 @@ void startNode(String _HubMacAddress, String _HubWiFiChannel) {
     }
 };
 
+// ==========[PINS]==========
+uint8_t ledPin = 7; // Pin for the LED
+uint8_t buttonPin = 8; // Pin for the button
+
 // ======================================================================
-
-sllib LED(0);
-
-TaskHandle_t ledTaskHandle = nullptr;
-void unInturuptedLoop(void* parameter) {
-    while (true) {
-        LED.update();
-        delay(1);
-    }
-}
 
 void setup() {
     Serial.begin(115200); // Serial communication at 115200 baud
@@ -506,12 +501,16 @@ void setup() {
 
     Serial.println("KAGE ESP32-C3 boot successful!");
 
-    // Initialize LED
-    int pattern[] = {300, 500};
-    LED.setPatternSingle(pattern, 2);
+    // [Register Pin Modes]
+    pinMode(buttonPin, INPUT_PULLUP);
+    pinMode(ledPin, OUTPUT);
 
+    int pattern[] = {3000, 1000, 3000, 1000, 3000, 1000};
+    finiteBreathLED(800, 3);
+
+    // [Setup LED worker]
     if (xTaskCreate(
-        unInturuptedLoop, // Task function
+        ledWorker, // Task function
         "LED Update Task", // Task name
         1024,
         NULL, // Task input parameter
@@ -576,6 +575,44 @@ void setup() {
 
 void loop() {
 
+    // [Handle Button Hold]
+    handleButtonHold(
+        buttonPin,
+        []() {
+            Serial.println("Button Identifying Node.");
+            sendTestPacketRequest(WiFi.channel());
+            identifyLED();
+        },
+        []() {
+            Serial.println("Button No Action.");
+        },
+        []() {
+            Serial.println("Button Clearing paired Hub.");
+            blinkLED(10);
+            clearPairedHub();
+            clearPendingPairing();
+            currentScanHubChannel = 1;
+            currentScanWiFiChannel = 1;
+        }
+    );
+
+    // [Handle Button Press]
+    handleButtonPress(
+        buttonPin,
+        []() { // Single Press
+            Serial.println("Button Pressed: Once.");
+            blinkLED(1);
+        },
+        []() { // Double Press
+            Serial.println("Button Pressed: Twice.");
+            blinkLED(2);
+        },
+        []() { // Triple Press
+            Serial.println("Button Pressed: Thrice.");
+            blinkLED(3);
+        }
+    );
+
     // [Process Incoming Packets]
     processPackets();
 
@@ -590,5 +627,5 @@ void loop() {
         LED.setOnSingle();
     }
 
-    delay(1);
+    delay(100); // mainly to save power
 }

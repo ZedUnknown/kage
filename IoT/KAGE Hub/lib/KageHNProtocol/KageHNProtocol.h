@@ -6,7 +6,6 @@
 #include <esp_wifi.h>
 #include <esp_err.h>
 #include <atomic>
-#include <ctype.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 

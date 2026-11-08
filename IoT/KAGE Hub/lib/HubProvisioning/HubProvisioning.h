@@ -8,7 +8,7 @@
 #include "HubTrust.h"
 #include "SetupPage.h"
 
-// ESP32 DevKit onboard LED; override for a different board or polarity.
+// ESP32 DevKit onboard LED. Default override for a different board or polarity.
 #ifndef KAGE_LED_PIN
 #define KAGE_LED_PIN 2
 #endif

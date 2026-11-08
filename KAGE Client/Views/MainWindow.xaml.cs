@@ -2,8 +2,6 @@
 using KAGE_Client.Services;
 using System.ComponentModel;
 using System.Diagnostics;
-using System.Net.Http;
-using System.Text.Json;
 using System.Windows;
 using System.Windows.Media;
 using Wpf.Ui.Controls;
@@ -30,7 +28,7 @@ public partial class MainWindow : FluentWindow, INotifyPropertyChanged {
     private readonly Forms.ContextMenuStrip _trayMenu;
     private WindowState _restoreWindowState = WindowState.Normal;
 
-    public string ServerAddress => _config.ServerAddress.Trim();
+    public string ServerAddress => MqttAddress.Format(_config.Mqtt);
 
     // Colors and brushes for status
     private readonly Brush _mutedBrush;
@@ -56,7 +54,7 @@ public partial class MainWindow : FluentWindow, INotifyPropertyChanged {
     public string MonitoringTitle { get; private set; } = "Waiting for client state";
     public string MonitoringDescription { get; private set; } = "Waiting for current server data.";
     public string MonitoringLabel { get; private set; } = "MONITORING / WAITING FOR DATA";
-    public string RequestType { get; private set; } = "INITIAL REQUEST";
+    public string RequestType { get; private set; } = "MQTT";
     public string SeatStatus { get; private set; } = "Unknown";
     public string SeatDescription { get; private set; } = "Waiting for current chair presence data.";
     public string ChairLabel => string.IsNullOrWhiteSpace(_config.ChairId) ? "No chair assigned to this PC" : $"Chair · {DisplayId(_config.ChairId)}";
@@ -67,7 +65,7 @@ public partial class MainWindow : FluentWindow, INotifyPropertyChanged {
     public string LastEventTime { get; private set; } = DateTime.Now.ToString("HH:mm:ss");
 
     // State variables
-    public bool CanRefresh => !_isChecking && !_isClosed;
+    public bool CanRefresh => !_isChecking && !_isClosed && _mqttClient?.IsConnected == true;
 
 
     // MQTT Client
@@ -85,12 +83,9 @@ public partial class MainWindow : FluentWindow, INotifyPropertyChanged {
         // Use this class as the source for XAML binding values
         DataContext = this;
 
-        // Server address as API object
-        Api api = new(_config.ServerAddress);
-
         // Initialize the command manager and subscribe to its events
         _mqttClient = new MqttClient(_config);
-        commandManager = new CommandManager(api, _config, _mqttClient);
+        commandManager = new CommandManager(_config, _mqttClient);
         commandManager.StateChanged += CommandManager_StateChanged; // command/countdown changes, independent of MQTT /state messages
         commandManager.ExecutionFailed += CommandManager_ExecutionFailed;
 
@@ -130,14 +125,9 @@ public partial class MainWindow : FluentWindow, INotifyPropertyChanged {
     }
 
     // [Window Events]
-    private async void MainWindow_Loaded(object sender, RoutedEventArgs e) {
-        // Unsubscribe to prevent multiple calls if the window is reloaded
+    private void MainWindow_Loaded(object sender, RoutedEventArgs e) {
         Loaded -= MainWindow_Loaded;
-
-        await LoadStateAsync();
-
-        // Start MQTT after the initial HTTP state has been applied.
-        if (!_isClosed && _state != null) StartMqtt();
+        StartMqtt();
     }
 
     private void MainWindow_Closing(object? sender, CancelEventArgs e) {
@@ -198,73 +188,30 @@ public partial class MainWindow : FluentWindow, INotifyPropertyChanged {
     // [Initial Full Load and Refresh]
     private bool _isChecking;
     private bool _isClosed;
+    private long _stateRevision;
 
     private async Task LoadStateAsync() {
         if (_isChecking || _isClosed) return;
-
         _isChecking = true;
-
-        bool _shouldRetry = false;
-
-
-        SetServerStatus("Checking…", "Requesting current state from the server", _waitingBrush);
+        long revision = _stateRevision;
+        SetServerStatus("Checking…", "Requesting current state through MQTT", _waitingBrush);
         UpdateBindings();
-
         try {
-            if (!Uri.TryCreate(ServerAddress, UriKind.Absolute, out Uri? address)
-                || (address.Scheme != Uri.UriSchemeHttp && address.Scheme != Uri.UriSchemeHttps)) {
-                ShowError("Invalid server address", "The configured server address is not valid. Please check the configuration.");
-                return;
-            }
-
-            Api api = new(ServerAddress);
-
-            // sending hub and pc id to server to get client state
-            KAGELockResponse? result = await api.apiFetch("/client/state", HttpMethod.Post, new {
-                hub_id = _config.HubId,
-                pc_id = _config.PcId
-            }, _lifetime.Token);
-
-            if (_isClosed) return; // just in case the window was closed while waiting for the server response
-            if (result == null) {
-                ShowError("No response", "The server did not return any data. Please check the server status.");
-                _shouldRetry = true;
-                return;
-            }
-
-            // Read client state data and update the config and bindings
-            ClientStateData state = ReadState(result.data);
-            ApplyState(state);
-
+            ClientStateData state = await _mqttClient.RequestStateAsync(_lifetime.Token);
+            // A live state update or disconnect supersedes this in-flight refresh.
+            if (!_isClosed && revision == _stateRevision && _mqttClient.IsConnected) ApplyState(state);
         }
         catch (OperationCanceledException) {
-            if (!_isClosed){
-                ShowError("Timed out", "Server connection timed out");
-                _shouldRetry = true;
-            }
+            if (!_isClosed && revision == _stateRevision) ShowError("Timed out", "No MQTT state reply. Check that the KAGE MQTT service is running.");
         }
-        catch (HttpRequestException) {
-            if (!_isClosed) {
-                ShowError("Disconnected", "Could not reach the KAGE server");
-                _shouldRetry = true;
-            }
-        }
-        catch (JsonException) {
-            if (!_isClosed) {
-                ShowError("Invalid response", "The server returned an invalid response");
-                _shouldRetry = true;
-            }
-
+        catch (Exception ex) {
+            if (!_isClosed && revision == _stateRevision) ShowError("State unavailable", ex.Message);
         }
         finally {
             _isChecking = false;
             if (!_isClosed) {
                 LastChecked = $"Checked at {DateTime.Now:HH:mm:ss}";
                 UpdateBindings();
-            }
-
-            if (_shouldRetry && !_isClosed) {
-                await WaitAndTryAsync();
             }
         }
     }
@@ -274,7 +221,8 @@ public partial class MainWindow : FluentWindow, INotifyPropertyChanged {
             return;
 
         _state = state;
-        SetServerStatus("Connected", "KAGE server connected", _accentBrush);
+        _stateRevision++;
+        SetServerStatus("Connected", "Receiving KAGE state through MQTT", _accentBrush);
 
         // Update relevant sections of the UI
         UpdateAssignment(_state);
@@ -388,10 +336,10 @@ public partial class MainWindow : FluentWindow, INotifyPropertyChanged {
                     Dispatcher.BeginInvoke(new Action(() => {
                         if (_isClosed) return;
                         if (connected) {
-                            SetServerStatus("Connected", "MQTT realtime connected", _accentBrush);
+                            SetServerStatus("Connected", "MQTT connected; waiting for current state", _accentBrush);
+                            _ = LoadStateAsync();
                         } else {
-                            commandManager.UpdateClientState(null);
-                            SetServerStatus("Disconnected", "MQTT disconnected. Retrying…", _waitingBrush);
+                            ShowError("Disconnected", "MQTT disconnected. Retrying…");
                             // TODO: OfflineRecoveryManager (2FA like) recovery code between server and each hub after a prolonged network outage.
                         }
                         UpdateBindings();
@@ -437,23 +385,6 @@ public partial class MainWindow : FluentWindow, INotifyPropertyChanged {
     // [Helpers]
     private static string DisplayId(string? value) => string.IsNullOrWhiteSpace(value) ? "Not assigned" : value.Trim();
 
-    private static ClientStateData ReadState(JsonElement data) {
-        if (data.ValueKind != JsonValueKind.Object) {
-            throw new JsonException("Missing client state.");
-        }
-
-        // The chair and sensor objects can be absent. These three cannot.
-        foreach (string name in new[] { "hub", "pc", "assignment" }) {
-            if (!data.TryGetProperty(name, out JsonElement value) || value.ValueKind != JsonValueKind.Object) {
-                throw new JsonException($"Missing {name} state.");
-            }
-        }
-
-        ClientStateData? state = data.Deserialize<ClientStateData>();
-        if (state == null) throw new JsonException("Missing client state.");
-        return state;
-    }
-
     private void SetServerStatus(string status, string message, Brush color) {
         ServerStatus = status;
         ServerMessage = message;
@@ -492,6 +423,7 @@ public partial class MainWindow : FluentWindow, INotifyPropertyChanged {
     }
 
     private void ShowError(string status, string message) {
+        _stateRevision++;
         commandManager.UpdateClientState(null);
         SetServerStatus(status, message, _waitingBrush);
         HubStatus = "Unknown";
@@ -507,24 +439,4 @@ public partial class MainWindow : FluentWindow, INotifyPropertyChanged {
         RecordEvent(message);
     }
 
-    private async Task WaitAndTryAsync() {
-        int seconds = 3;
-
-        while (seconds > 0 && !_isClosed) {
-            LastEvent = $"Retrying in {seconds} seconds…";
-            LastEventTime = DateTime.Now.ToString("HH:mm:ss");
-
-            UpdateBindings();
-
-            await Task.Delay(1200);
-
-            seconds--;
-        }
-
-        if (!_isClosed) {
-            LastEvent = "Connecting to server…";
-            LastEventTime = DateTime.Now.ToString("HH:mm:ss");
-            await LoadStateAsync();
-        }
-    }
 }

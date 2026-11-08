@@ -2,7 +2,7 @@ using System.Windows;
 using System.Windows.Media;
 using System.Windows.Shapes;
 
-namespace KAGE_Client.Views;
+namespace KAGE_Client.Controls;
 
 /// <summary>A button silhouette with equal, fixed-size 45-degree corner cuts.</summary>
 public sealed class ChamferedButtonShape : Shape

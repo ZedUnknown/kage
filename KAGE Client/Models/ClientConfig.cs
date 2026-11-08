@@ -4,7 +4,6 @@ public class ClientConfig {
 
     public int ConfigVersion { get; set; } = 1;
 
-    public string ServerAddress { get; set; } = "";
     public string HubId { get; set; } = "";
     public string PcId { get; set; } = "";
 

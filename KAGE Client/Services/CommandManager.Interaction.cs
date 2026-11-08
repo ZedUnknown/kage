@@ -1,8 +1,6 @@
 using KAGE_Client.Models;
 using System.ComponentModel;
 using System.Diagnostics;
-using System.Net;
-using System.Net.Http;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Windows.Threading;
@@ -63,7 +61,7 @@ public partial class CommandManager : IDisposable {
             SetInteractionMessage("Choose an extension of 1, 2, 5 or 10 minutes.");
             return;
         }
-        if (_config == null || (cancel ? _api == null : _mqttClient == null)) {
+        if (_config == null || _mqttClient == null) {
             SetInteractionMessage("Server connection is unavailable. The countdown is still active.");
             return;
         }
@@ -87,18 +85,11 @@ public partial class CommandManager : IDisposable {
                 return;
             }
 
-            // Recheck presence over HTTP; a cached occupied state may predate a disconnect.
+            // Request fresh presence through MQTT; a retained state may predate a disconnect.
             if (cancel) {
                 long stateVersion = _stateVersion;
-                KAGELockResponse? stateResult = await _api!.apiFetch("/client/state", HttpMethod.Post, new {
-                    hub_id = _config.HubId, pc_id = _config.PcId
-                }, request.Token);
+                ClientStateData freshState = await _mqttClient.RequestStateAsync(request.Token);
                 if (!IsCurrentRequest(requestedCommand, request)) return;
-                if (!IsSuccess(stateResult)) {
-                    SetInteractionMessage("Could not verify chair presence. The countdown is still active.");
-                    return;
-                }
-                ClientStateData? freshState = stateResult!.data.Deserialize<ClientStateData>();
                 if (!HasPresence(freshState) || (_stateVersion != stateVersion && !HasPresence(_clientState))) {
                     SetInteractionMessage("Cancel rejected: the assigned chair must be online and occupied. The countdown is still active.");
                     return;
@@ -108,8 +99,8 @@ public partial class CommandManager : IDisposable {
             }
 
             // These requests never change the local timer. Only an approved command does.
-            KAGELockResponse? result = await _api!.apiFetch(
-                "/client/cancel-extension", HttpMethod.Post, new {
+            MqttResponse result = await _mqttClient.RequestAsync(
+                "cancel_extension", new {
                     hub_id = _config.HubId,
                     pc_id = _config.PcId,
                     command = requestedCommand.Command,
@@ -117,7 +108,7 @@ public partial class CommandManager : IDisposable {
                     duration_seconds = cancel ? 0 : minutes * 60
                 }, request.Token);
             if (!IsCurrentRequest(requestedCommand, request)) return;
-            if (!IsSuccess(result)) {
+            if (!result.IsSuccess) {
                 SetInteractionMessage(result?.detail?.message ?? "The server rejected the request. The countdown is still active.");
                 return;
             }
@@ -141,20 +132,13 @@ public partial class CommandManager : IDisposable {
         catch (OperationCanceledException) {
             if (IsCurrentRequest(requestedCommand, request)) SetInteractionMessage("Request timed out. The countdown is still active.");
         }
-        catch (HttpRequestException ex) {
-            if (IsCurrentRequest(requestedCommand, request)) {
-                SetInteractionMessage(ex.StatusCode == HttpStatusCode.NotFound || ex.StatusCode == HttpStatusCode.MethodNotAllowed
-                    ? "This server does not support this request yet. The countdown is still active."
-                    : "Could not reach the server. The countdown is still active.");
-            }
-        }
         catch (JsonException) {
             if (IsCurrentRequest(requestedCommand, request)) SetInteractionMessage("Invalid server response. The countdown is still active.");
         }
-        catch (Exception ex) when (!cancel) {
+        catch (Exception ex) {
             Trace.WriteLine($"MQTT extension request failed: {ex.Message}");
             if (IsCurrentRequest(requestedCommand, request))
-                SetInteractionMessage("Could not send the extension request. The countdown is still active.");
+                SetInteractionMessage("Could not send or confirm the MQTT request. The countdown is still active.");
         }
         finally {
             if (ReferenceEquals(_requestCancellation, request)) {
@@ -183,10 +167,6 @@ public partial class CommandManager : IDisposable {
         }
         return true;
     }
-
-    private static bool IsSuccess(KAGELockResponse? result) =>
-        string.Equals(result?.detail?.code, "SUCCESS", StringComparison.OrdinalIgnoreCase)
-        && result!.data.ValueKind == JsonValueKind.Object;
 
     private void SetInteractionMessage(string message) {
         InteractionMessage = message;

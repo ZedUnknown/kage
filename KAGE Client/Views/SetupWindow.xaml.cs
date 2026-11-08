@@ -1,4 +1,3 @@
-using System.Net.Http;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Media;
@@ -12,7 +11,9 @@ namespace KAGE_Client.Views;
 public partial class SetupWindow : FluentWindow {
     private FrameworkElement _currentPage;
 
-    private Api? _apiClient = null;
+    private MqttSession? _mqttSession;
+    private MqttConfig? _mqttConfig;
+    private readonly CancellationTokenSource _lifetime = new();
 
     // Setup Data
     private string? _serverAddress = null;
@@ -32,103 +33,82 @@ public partial class SetupWindow : FluentWindow {
             ResetAfterServerChange();
         };
         HubIdBox.TextChanged += (_, _) => ResetAfterHubChange();
+        MqttUsernameBox.TextChanged += (_, _) => ResetAfterServerChange();
+        MqttTokenBox.PasswordChanged += (_, _) => ResetAfterServerChange();
+        Closed += (_, _) => {
+            _lifetime.Cancel();
+            _mqttSession?.Dispose();
+        };
     }
 
     private async void ServerConnectButton_Click(object sender, RoutedEventArgs e) {
         if (_isPendingRequest) return;
-        string serverAddress = ServerAddressBox.Text.Trim();
-
-        ServerNextButton.Visibility = Visibility.Collapsed;
-        StatusText.Foreground = Brushes.Gray;
-
-        // A new server invalidates every verification performed against the old one.
         ResetAfterServerChange();
-
-        if (!TryValidateServerAddress(serverAddress, out Uri? serverUri)) {
+        if (!MqttAddress.TryParse(ServerAddressBox.Text, out MqttConfig config)) {
+            StatusText.Text = "Enter an MQTT address, such as mqtts://192.168.1.23:8883 (or mqtt://host:1883).";
             StatusText.Foreground = Brushes.Red;
             return;
         }
-
+        if (string.IsNullOrWhiteSpace(MqttTokenBox.Password)) {
+            StatusText.Text = "Enter your MQTT token.";
+            StatusText.Foreground = Brushes.Red;
+            return;
+        }
+        config.Username = MqttUsernameBox.Text.Trim();
+        config.Password = MqttTokenBox.Password;
         PendingRequest(true);
-        StatusText.Text = $"Connecting to {serverUri!.Host}...";
+        StatusText.Text = $"Connecting to MQTT broker {config.Address}...";
         StatusText.Foreground = Brushes.Gray;
-
+        MqttSession session = new();
+        _mqttSession = session;
         try {
-            Api apiClient = new Api(serverAddress);
-            KAGELockResponse? result = await apiClient.apiFetch("/setup/ping", HttpMethod.Get, null);
-
-            // Check for null response
-            if (result == null) {
-                StatusText.Text = "The server returned a corrupted response.";
-                StatusText.Foreground = Brushes.Red;
-                return;
-            }
-
-            // Check for success code
-            if (!string.Equals(result.detail?.code, "SUCCESS", StringComparison.OrdinalIgnoreCase)) {
-                StatusText.Text = result.detail?.message ?? "The server rejected the connection.";
-                StatusText.Foreground = Brushes.Red;
-                return;
-            }
-
-            if (result.data.TryGetProperty("key", out JsonElement keyElement)) {
-                string? key = keyElement.GetString();
-                if (key != "KAGELOCK") {
-                    StatusText.Text = "The server responded, but it is not a KAGE Lock server.";
-                    StatusText.Foreground = Brushes.Red;
-                    return;
-                }
-            }
-
-            // Save
-            _apiClient = apiClient;
-            _serverAddress = serverAddress;
-
-            StatusText.Text = result.detail?.message ?? $"Connected to {serverUri.Host} successfully.";
+            await session.ConnectAsync(config, [], _lifetime.Token);
+            _lifetime.Token.ThrowIfCancellationRequested();
+            _mqttConfig = config;
+            _serverAddress = MqttAddress.Format(config);
+            StatusText.Text = "Connected to the MQTT broker. Continue to verify your Hub ID.";
             StatusText.Foreground = Brushes.LimeGreen;
             ServerNextButton.Visibility = Visibility.Visible;
             ServerNextButton.Appearance = ControlAppearance.Primary;
             HubNavigationButton.IsEnabled = true;
-
         }
-        catch (TaskCanceledException) {
-            StatusText.Text = "Connection timed out. Check the address and try again.";
-            StatusText.Foreground = Brushes.Red;
-        }
-        catch (HttpRequestException ex) {
-            StatusText.Text = $"Could not connect to the server: {ex.Message}";
-            StatusText.Foreground = Brushes.Red;
-        }
-        catch (JsonException) {
-            StatusText.Text = "The server returned an invalid response.";
+        catch (OperationCanceledException) {
+            ResetAfterServerChange();
+            StatusText.Text = "MQTT connection timed out. Check the address and try again.";
             StatusText.Foreground = Brushes.Red;
         }
         catch (Exception ex) {
-            StatusText.Text = $"Unexpected error: {ex.Message}";
+            ResetAfterServerChange();
+            StatusText.Text = $"Could not connect to MQTT. Check the token, broker permissions and CA certificate. {ex.GetBaseException().Message}";
             StatusText.Foreground = Brushes.Red;
         }
-        finally {
-            PendingRequest(false);
-        }
+        finally { PendingRequest(false); }
+    }
+
+    private async Task<MqttResponse> RequestSetupAsync(string action, object data) {
+        if (_mqttSession == null) throw new InvalidOperationException("Connect to the MQTT broker first.");
+        MqttResponse response = await _mqttSession.RequestAsync("kage/client/setup/request", action, data, _lifetime.Token);
+        _lifetime.Token.ThrowIfCancellationRequested();
+        return response;
     }
 
     private async void HubConnectButton_Click(object sender, RoutedEventArgs e) {
         if (_isPendingRequest) return;
         string hubId = HubIdBox.Text.Trim();
         ResetAfterHubChange();
-        if (string.IsNullOrWhiteSpace(hubId)) {
+        if (!MqttAddress.IsTopicId(hubId)) {
             ShowHubError("Enter the Hub ID provided by your administrator.");
             return;
         }
-        if (_apiClient == null) {
-            ShowHubError("Connect to the KAGE server before checking a Hub ID.");
+        if (_mqttSession == null) {
+            ShowHubError("Connect to the MQTT broker before checking a Hub ID.");
             return;
         }
         await LoadAvailablePcsAsync(hubId, refreshing: false);
     }
 
     private async void RefreshAvailablePcsButton_Click(object sender, RoutedEventArgs e) {
-        if (_isPendingRequest || _apiClient == null || string.IsNullOrWhiteSpace(_hubId)) return;
+        if (_isPendingRequest || _mqttSession == null || string.IsNullOrWhiteSpace(_hubId)) return;
         await LoadAvailablePcsAsync(_hubId, refreshing: true);
     }
 
@@ -143,8 +123,7 @@ public partial class SetupWindow : FluentWindow {
         PcStatusText.Text = HubStatusText.Text;
         PcStatusText.Foreground = Brushes.Gray;
         try {
-            KAGELockResponse? result = await _apiClient!.apiFetch(
-                $"/setup/hub/{Uri.EscapeDataString(hubId)}/check", HttpMethod.Get);
+            MqttResponse? result = await RequestSetupAsync("hub_check", new { hub_id = hubId });
             if (!TryReadAvailablePcs(result, out string[] pcs, out string message)) {
                 ShowHubError(message);
                 if (refreshing) NavigateTo(HubPage, HubNavigationButton);
@@ -162,11 +141,8 @@ public partial class SetupWindow : FluentWindow {
                 : "Select the PC assigned to this computer by your administrator.";
             PcStatusText.Foreground = Brushes.Gray;
         }
-        catch (TaskCanceledException) {
-            ShowHubError("The Hub ID check timed out. Try again.");
-        }
-        catch (HttpRequestException ex) {
-            ShowHubError($"Could not load available PCs: {ex.Message}");
+        catch (OperationCanceledException) {
+            ShowHubError("No Hub reply. Check that the KAGE MQTT service is running, then retry.");
         }
         catch (JsonException) {
             ShowHubError("The server returned an invalid response.");
@@ -179,7 +155,7 @@ public partial class SetupWindow : FluentWindow {
         }
     }
 
-    private static bool TryReadAvailablePcs(KAGELockResponse? result, out string[] pcs, out string message) {
+    private static bool TryReadAvailablePcs(MqttResponse? result, out string[] pcs, out string message) {
         pcs = [];
         message = "The server returned an invalid Hub response. Try again.";
         if (result == null) return false;
@@ -199,7 +175,7 @@ public partial class SetupWindow : FluentWindow {
         pcs = list.EnumerateArray()
             .Where(pc => pc.ValueKind == JsonValueKind.String)
             .Select(pc => pc.GetString()!)
-            .Where(pc => !string.IsNullOrWhiteSpace(pc))
+            .Where(MqttAddress.IsTopicId)
             .Distinct(StringComparer.Ordinal)
             .ToArray();
         if (pcs.Length == 0) {
@@ -241,13 +217,15 @@ public partial class SetupWindow : FluentWindow {
 
     private void UpdatePcActions() {
         PcConnectButton.IsEnabled = !_isPendingRequest && HasAvailableSelection();
-        RefreshAvailablePcsButton.IsEnabled = !_isPendingRequest && _apiClient != null && _hubId != null;
+        RefreshAvailablePcsButton.IsEnabled = !_isPendingRequest && _mqttSession != null && _hubId != null;
     }
 
     private void PendingRequest(bool isPending) {
         _isPendingRequest = isPending;
         NavigationGrid.IsEnabled = !isPending;
         ServerAddressBox.IsEnabled = !isPending;
+        MqttUsernameBox.IsEnabled = !isPending;
+        MqttTokenBox.IsEnabled = !isPending;
         HubIdBox.IsEnabled = !isPending;
         ServerConnectButton.IsEnabled = !isPending;
         HubConnectButton.IsEnabled = !isPending;
@@ -267,8 +245,8 @@ public partial class SetupWindow : FluentWindow {
             PcStatusText.Foreground = Brushes.Red;
             return;
         }
-        if (_apiClient == null || string.IsNullOrWhiteSpace(_hubId)) {
-            PcStatusText.Text = "Connect to the server and verify a Hub before selecting a PC.";
+        if (_mqttSession == null || string.IsNullOrWhiteSpace(_hubId)) {
+            PcStatusText.Text = "Connect to MQTT and verify a Hub before selecting a PC.";
             PcStatusText.Foreground = Brushes.Red;
             return;
         }
@@ -277,8 +255,7 @@ public partial class SetupWindow : FluentWindow {
         PcStatusText.Text = "Verifying selected PC...";
         PcStatusText.Foreground = Brushes.Gray;
         try {
-            KAGELockResponse? result = await _apiClient.apiFetch(
-                $"/setup/hub/{Uri.EscapeDataString(_hubId)}/pc/{Uri.EscapeDataString(pcId)}/check", HttpMethod.Get);
+            MqttResponse? result = await RequestSetupAsync("pc_check", new { hub_id = _hubId, pc_id = pcId });
             if (result == null || result.data.ValueKind != JsonValueKind.Object ||
                 !result.data.TryGetProperty("available", out JsonElement available) ||
                 available.ValueKind != JsonValueKind.True ||
@@ -298,12 +275,8 @@ public partial class SetupWindow : FluentWindow {
             FinishHubText.Text = _hubId;
             FinishPcText.Text = _pcId;
         }
-        catch (TaskCanceledException) {
-            PcStatusText.Text = "The PC check timed out. Try again.";
-            PcStatusText.Foreground = Brushes.Red;
-        }
-        catch (HttpRequestException ex) {
-            PcStatusText.Text = $"Could not verify the PC: {ex.Message}";
+        catch (OperationCanceledException) {
+            PcStatusText.Text = "No PC reply. Check that the KAGE MQTT service is running, then retry.";
             PcStatusText.Foreground = Brushes.Red;
         }
         catch (JsonException) {
@@ -321,8 +294,11 @@ public partial class SetupWindow : FluentWindow {
 
 
     private void ResetAfterServerChange() {
-        _apiClient = null;
+        _mqttSession?.Dispose();
+        _mqttSession = null;
+        _mqttConfig = null;
         _serverAddress = null;
+        ServerNextButton.Visibility = Visibility.Collapsed;
 
         HubNavigationButton.IsEnabled = false;
         HubNextButton.Visibility = Visibility.Collapsed;
@@ -363,119 +339,39 @@ public partial class SetupWindow : FluentWindow {
 
     private async void RegisterPcButton_Click(object sender, RoutedEventArgs e) {
         if (_isPendingRequest) return;
-        if (_apiClient == null || string.IsNullOrWhiteSpace(_hubId) || string.IsNullOrWhiteSpace(_pcId) ||
-            !HasAvailableSelection() || !string.Equals(AvailablePcsList.SelectedItem as string, _pcId, StringComparison.Ordinal)) {
-            FinishStatusText.Text = "Connect to the KAGE server and verify a Hub ID and PC ID before registering.";
+        if (_mqttSession == null || _mqttConfig == null || !MqttAddress.IsTopicId(_hubId) || !MqttAddress.IsTopicId(_pcId)
+            || !HasAvailableSelection() || AvailablePcsList.SelectedItem as string != _pcId) {
+            FinishStatusText.Text = "Connect to MQTT and verify a Hub ID and PC before registering.";
             FinishStatusText.Foreground = Brushes.Red;
             FinishStatusText.Visibility = Visibility.Visible;
             return;
         }
-
         PendingRequest(true);
         RegisterPcButton.IsEnabled = false;
-
-        FinishStatusText.Text = "Registering this PC...";
+        FinishStatusText.Text = "Registering this PC through MQTT...";
         FinishStatusText.Foreground = Brushes.Gray;
         FinishStatusText.Visibility = Visibility.Visible;
-
         try {
-            KAGELockResponse? result = await _apiClient.apiFetch($"/setup/hub/{Uri.EscapeDataString(_hubId)}/pc/{Uri.EscapeDataString(_pcId)}/register", HttpMethod.Get);
-
-            // Check for null response
-            if (result == null) {
-                FinishStatusText.Text = "The server returned a corrupted response.";
+            MqttResponse result = await RequestSetupAsync("register", new { hub_id = _hubId, pc_id = _pcId });
+            if (!result.IsSuccess || !result.data.TryGetProperty("registered", out JsonElement registered)
+                || registered.ValueKind != JsonValueKind.True) {
+                FinishStatusText.Text = result.detail?.message ?? "The MQTT service rejected registration.";
                 FinishStatusText.Foreground = Brushes.Red;
                 return;
             }
-
-            if (result.data.TryGetProperty("registered", out JsonElement keyElement)) {
-                bool registered = keyElement.GetBoolean();
-                if (!registered) {
-                    FinishStatusText.Text = result.detail?.message ?? $"PC {_pcId} could not be registered.";
-                    FinishStatusText.Foreground = Brushes.Red;
-                    return;
-                }
-
-            } else { // not necessary but just in case the server returns a different response structure during development
-                FinishStatusText.Text = "The server returned an unexpected response.";
-                FinishStatusText.Foreground = Brushes.Red;
-                return;
-            }
-
-            FinishStatusText.Text = result.detail?.message ?? $"PC {_pcId} was registered successfully.";
-            FinishStatusText.Foreground = Brushes.LimeGreen;
-
-            // LOCK ALL NAVIGATION BUTTONS AND HIDE
-            ServerNavigationButton.IsEnabled = false;
-            HubNavigationButton.IsEnabled = false;
-            PcNavigationButton.IsEnabled = false;
-            FinishNavigationButton.IsEnabled = false;
-            RegisterPcButton.IsEnabled = false;
-
-            NavigationGrid.Visibility = Visibility.Collapsed;
-            RegisterPcButton.Visibility = Visibility.Collapsed;
-
-            // extract MQTT configuration from the server response
-            if (result.data.TryGetProperty("mqtt", out JsonElement mqttElement)) {
-                MqttConfig mqttConfig = new MqttConfig();
-
-                if (mqttElement.TryGetProperty("address", out JsonElement addressElement)) {
-                    mqttConfig.Address = addressElement.GetString() ?? "";
-                }
-
-                if (mqttElement.TryGetProperty("port", out JsonElement portElement)) {
-                    mqttConfig.Port = portElement.GetInt32();
-                }
-
-                if (mqttElement.TryGetProperty("use_tls", out JsonElement useTlsElement)) {
-                    mqttConfig.UseTls = useTlsElement.GetBoolean();
-                }
-
-                if (mqttElement.TryGetProperty("username", out JsonElement usernameElement)) {
-                    mqttConfig.Username = usernameElement.GetString() ?? "";
-                }
-
-                if (mqttElement.TryGetProperty("password", out JsonElement passwordElement)) {
-                    mqttConfig.Password = passwordElement.GetString() ?? "";
-                }
-
-                // Save the configuration to a local file
-                ClientConfig config = new ClientConfig
-                {
-                    ServerAddress = _serverAddress ?? "",
-                    HubId = _hubId ?? "",
-                    PcId = _pcId ?? "",
-                    Mqtt = mqttConfig
-                };
-
-                await ConfigService.SaveAsync(config);
-
-                // Switch to the main application window
-                MainWindow mainWindow = new MainWindow(config);
-                mainWindow.Show();
-                Close();
-
-            } else {
-                FinishStatusText.Text = "The server did not provide MQTT configuration.";
-                FinishStatusText.Foreground = Brushes.Red;
-                return;
-            }
-
+            ClientConfig config = new() { HubId = _hubId!, PcId = _pcId!, Mqtt = _mqttConfig };
+            await ConfigService.SaveAsync(config);
+            _lifetime.Token.ThrowIfCancellationRequested();
+            MainWindow mainWindow = new(config);
+            mainWindow.Show();
+            Close();
         }
-        catch (TaskCanceledException) {
-            FinishStatusText.Text = "The registration request timed out. Try again.";
-            FinishStatusText.Foreground = Brushes.Red;
-        }
-        catch (HttpRequestException ex) {
-            FinishStatusText.Text = $"Could not register this PC: {ex.Message}";
-            FinishStatusText.Foreground = Brushes.Red;
-        }
-        catch (JsonException) {
-            FinishStatusText.Text = "The server returned an invalid response.";
+        catch (OperationCanceledException) {
+            FinishStatusText.Text = "No registration reply. Check that the KAGE MQTT service is running, then retry.";
             FinishStatusText.Foreground = Brushes.Red;
         }
         catch (Exception ex) {
-            FinishStatusText.Text = $"Unexpected error: {ex.Message}";
+            FinishStatusText.Text = $"Could not register this PC: {ex.Message}";
             FinishStatusText.Foreground = Brushes.Red;
         }
         finally {
@@ -551,24 +447,4 @@ public partial class SetupWindow : FluentWindow {
         Close();
     }
 
-    private bool TryValidateServerAddress(string address, out Uri? uri) {
-        uri = null;
-
-        if (string.IsNullOrWhiteSpace(address)) {
-            StatusText.Text = "Enter a server address.";
-            return false;
-        }
-
-        if (!Uri.TryCreate(address, UriKind.Absolute, out uri)) {
-            StatusText.Text = "Enter a valid address, such as http://localhost:8000.";
-            return false;
-        }
-
-        if (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps) {
-            StatusText.Text = "The server address must use http:// or https://.";
-            return false;
-        }
-
-        return true;
-    }
 }

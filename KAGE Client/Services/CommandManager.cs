@@ -11,7 +11,6 @@ public partial class CommandManager {
 
     private ClientCommandData? _ongoingCommand;
     private ClientCommandData? _lastCommand = null;
-    private readonly Api? _api;
     private readonly ClientConfig? _config;
     private readonly MqttClient? _mqttClient;
 
@@ -34,11 +33,9 @@ public partial class CommandManager {
     }
 
     public CommandManager(
-        Api? api = null,
         ClientConfig? config = null,
         MqttClient? mqttClient = null
     ) {
-        _api = api;
         _config = config;
         _mqttClient = mqttClient;
 

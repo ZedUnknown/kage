@@ -139,6 +139,40 @@
                 </Setter.Value>
             </Setter>
         </Style>
+        <Style x:Key="SetupTokenInput" TargetType="PasswordBox">
+            <Setter Property="Background" Value="#222224"/>
+            <Setter Property="Foreground" Value="#F4F2F0"/>
+            <Setter Property="CaretBrush" Value="#F4F2F0"/>
+            <Setter Property="SelectionBrush" Value="#96303B"/>
+            <Setter Property="BorderBrush" Value="#454246"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="FontFamily" Value="{StaticResource ArameFont}"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Padding" Value="12,10"/>
+            <Setter Property="MinHeight" Value="44"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="PasswordBox">
+                        <Border x:Name="InputBorder" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}">
+                            <ScrollViewer x:Name="PART_ContentHost" VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="InputBorder" Property="BorderBrush" Value="#8F7478"/>
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                                <Setter TargetName="InputBorder" Property="BorderBrush" Value="{StaticResource SetupRed}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.5"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
         <Style x:Key="ActionButton" TargetType="ui:Button">
             <Setter Property="Background" Value="#E62B37"/>
             <Setter Property="Foreground" Value="White"/>
@@ -194,7 +228,7 @@
             <Setter Property="Margin" Value="0,16,0,0"/>
         </Style>
         <Style x:Key="ServerAction" TargetType="ui:Button" BasedOn="{StaticResource ActionButton}">
-            <Setter Property="Content" Value="CONNECT TO SERVER"/>
+            <Setter Property="Content" Value="CONNECT TO MQTT"/>
             <Style.Triggers>
                 <DataTrigger Binding="{Binding Visibility, ElementName=ServerNextButton}" Value="Visible">
                     <Setter Property="Content" Value="SERVER VERIFIED / CHECK AGAIN"/>
@@ -319,7 +353,7 @@
                             <RadioButton x:Name="ServerNavigationButton" GroupName="SetupNavigation" Tag="01" Style="{StaticResource NavigationButtonStyle}" IsChecked="True" Click="ServerNavigationButton_Click">
                                 <StackPanel>
                                     <TextBlock Text="Server" FontSize="14" FontWeight="SemiBold"/>
-                                    <TextBlock Text="Connect to your KAGE server" FontSize="12" LineHeight="16" TextWrapping="Wrap" Foreground="{StaticResource SetupMuted}" Margin="0,5,0,0"/>
+                                    <TextBlock Text="Connect to your MQTT broker" FontSize="12" LineHeight="16" TextWrapping="Wrap" Foreground="{StaticResource SetupMuted}" Margin="0,5,0,0"/>
                                 </StackPanel>
                             </RadioButton>
                             <RadioButton x:Name="HubNavigationButton" GroupName="SetupNavigation" Tag="02" Style="{StaticResource NavigationButtonStyle}" IsEnabled="False" Click="HubNavigationButton_Click">
@@ -401,7 +435,7 @@
                                             <TextBlock FontSize="11" Foreground="#EAE7E7" TextTrimming="CharacterEllipsis">
                                                 <TextBlock.Style>
                                                     <Style TargetType="TextBlock" BasedOn="{StaticResource TechnicalLabel}">
-                                                        <Setter Property="Text" Value="SERVER CONNECTION"/>
+                                                        <Setter Property="Text" Value="MQTT CONNECTION"/>
                                                         <Style.Triggers>
                                                             <DataTrigger Binding="{Binding Visibility, ElementName=HubPage}" Value="Visible">
                                                                 <Setter Property="Text" Value="HUB VERIFICATION"/>
@@ -423,7 +457,7 @@
                                     <Grid>
                                         <StackPanel Margin="12,11">
                                             <TextBlock Text="PROTOCOL" Style="{StaticResource TechnicalLabel}" FontSize="11" Margin="0,0,0,9"/>
-                                            <TextBlock Text="REST / JSON" FontFamily="{StaticResource ArameFont}" FontSize="11"/>
+                                            <TextBlock Text="MQTT / JSON" FontFamily="{StaticResource ArameFont}" FontSize="11"/>
                                         </StackPanel>
                                     </Grid>
                                 </Border>
@@ -485,17 +519,21 @@
                                     <StackPanel x:Name="ServerPage" VerticalAlignment="Top">
                                         <TextBlock Text="01 / INITIALIZE CONNECTION" Style="{StaticResource TechnicalLabel}" Foreground="{StaticResource SetupRed}"/>
                                         <TextBlock Text="Connect to KAGE" Style="{StaticResource PageTitle}"/>
-                                        <TextBlock Text="Connect to your KAGE control server to begin device registration." Style="{StaticResource PageDescription}" />
+                                        <TextBlock Text="Connect to your MQTT broker to begin device registration." Style="{StaticResource PageDescription}" />
                                         <Border Background="#151517" BorderBrush="{StaticResource SetupLine}" BorderThickness="1">
                                             <Grid>
                                                 <Border Height="3" Width="68" Background="{StaticResource SetupRed}" HorizontalAlignment="Left" VerticalAlignment="Top"/>
                                                 <StackPanel Margin="24,26,24,24">
                                                     <DockPanel Margin="0,0,0,24">
                                                         <ui:SymbolIcon Symbol="Server24" FontSize="19" Margin="0,0,10,0"/>
-                                                        <TextBlock Text="Server connection" FontSize="17" FontWeight="SemiBold"/>
+                                                        <TextBlock Text="MQTT server connection" FontSize="17" FontWeight="SemiBold"/>
                                                     </DockPanel>
-                                                    <Label Content="Server address" Target="{Binding ElementName=ServerAddressBox}" Padding="0" Margin="0,0,0,9" Foreground="#EAE7E7" FontSize="12"/>
-                                                    <TextBox x:Name="ServerAddressBox" Text="http://127.0.0.1:8000" Style="{StaticResource SetupInput}" Margin="0,0,0,14" AutomationProperties.Name="Server address"/>
+                                                    <Label Content="MQTT server address" Target="{Binding ElementName=ServerAddressBox}" Padding="0" Margin="0,0,0,9" Foreground="#EAE7E7" FontSize="12"/>
+                                                    <TextBox x:Name="ServerAddressBox" Text="mqtts://127.0.0.1:8883" Style="{StaticResource SetupInput}" Margin="0,0,0,14" AutomationProperties.Name="MQTT server address"/>
+                                                    <Label Content="Username" Target="{Binding ElementName=MqttUsernameBox}" Padding="0" Margin="0,0,0,9" Foreground="#EAE7E7" FontSize="12"/>
+                                                    <TextBox x:Name="MqttUsernameBox" Style="{StaticResource SetupInput}" Margin="0,0,0,14" AutomationProperties.Name="MQTT username"/>
+                                                    <Label Content="MQTT token" Target="{Binding ElementName=MqttTokenBox}" Padding="0" Margin="0,0,0,9" Foreground="#EAE7E7" FontSize="12"/>
+                                                    <PasswordBox x:Name="MqttTokenBox" Style="{StaticResource SetupTokenInput}" Margin="0,0,0,14" AutomationProperties.Name="MQTT token"/>
                                                     <ui:Button x:Name="ServerConnectButton" Style="{StaticResource ServerAction}" Appearance="Primary" Click="ServerConnectButton_Click"/>
                                                     <Grid Margin="0,18,0,0">
                                                         <Grid.ColumnDefinitions>

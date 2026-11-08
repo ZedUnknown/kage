@@ -56,11 +56,6 @@
     <PackageReference Include="WPF-UI" Version="4.3.0" />
   </ItemGroup>
 
-  <!-- Optional Mosquitto CA. Omit ca.crt to use normal Windows certificate trust. -->
-  <ItemGroup Condition="Exists('ca.crt')">
-    <EmbeddedResource Include="ca.crt" LogicalName="KAGE_Client.ca.crt" />
-  </ItemGroup>
-
   <ItemGroup>
     <Resource Include="Assets\Fonts\arame-mono-regular.ttf">
       <CopyToOutputDirectory>Never</CopyToOutputDirectory>

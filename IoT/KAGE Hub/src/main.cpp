@@ -6,6 +6,8 @@
 #include <KageHNProtocol.h>
 #include <Declarations.h>
 #include <SyncTime.h>
+#include <HubProvisioning.h>
+
 
 String _prefix = "kage/hub/";
 
@@ -216,6 +218,23 @@ void clearWiFiCredentials() {
     Serial.println("TEST: Wi-Fi credentials cleared.");
 }
 
+// [Clear Token and Hub ID]
+void clearTokenAndHubId() {
+    preferences.begin("kage", false);
+
+    // Remove Hub ID and Token from NVS
+    preferences.remove("HubId");
+    preferences.remove("HubToken");
+
+    preferences.end();
+
+    // Clear runtime copy
+    hubId = "";
+    hubToken = "";
+
+    Serial.println("TEST: Hub ID and Token cleared.");
+}
+
 bool isEmptyMac(const uint8_t* macAddress) {
     const uint8_t emptyMac[6] = {
         0, 0, 0, 0, 0, 0
@@ -404,49 +423,26 @@ QueueHandle_t mqttOutgoing = nullptr;
 std::atomic<bool> mqttOnline{false};
 std::atomic<uint32_t> mqttCommandDrops{0};
 
-const char* mqttServer = "192.168.1.23";
-const int mqttPort = 8883;
+String mqttServer = "192.168.1.23";
+int mqttPort = 8883;
 
-const char* rootCA = R"EOF(
------BEGIN CERTIFICATE-----
-MIIDnzCCAoegAwIBAgIUC77zMrXUv4qytH+qLel6ETXC8v8wDQYJKoZIhvcNAQEL
-BQAwVzEcMBoGA1UECgwTQXJhc2FrYSBDb3Jwb3JhdGlvbjEfMB0GA1UECwwWS0FH
-RSBXb3Jrc3BhY2UgU3lzdGVtczEWMBQGA1UEAwwNS0FHRSBMb2NhbCBDQTAeFw0y
-NjEwMTAyMjM4MDFaFw0zNjEwMDcyMjM4MDFaMFcxHDAaBgNVBAoME0FyYXNha2Eg
-Q29ycG9yYXRpb24xHzAdBgNVBAsMFktBR0UgV29ya3NwYWNlIFN5c3RlbXMxFjAU
-BgNVBAMMDUtBR0UgTG9jYWwgQ0EwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEK
-AoIBAQDoLjlSSYIHaqDMqSNpKA+D4xMUvL+/L92dJ9mb2b4LsXj67fRiQ9tuAqZY
-khBMDW/NaKnUM7kh45LeYKHcMbLrEDFyXTaZ+5/HiNwN5k9zPE5FojDPTnItJL/N
-nWOCtvdnn2KFiW46sHsznodpumQDVTf7nw9BFRh0FG4STs2wxt+qS4ql/dxUwPBL
-kulZ7MrqPcbvVnQtzVQfAjw/E3vFkuOAch6apGfePq7IyRVPUfck0x3T6n4ZExTv
-Av4nBYqAy/duiXcfjlyxuJ3SIT5fjz/LzeJ2wmPlVEoL1H5+AbgB4PcS1PJNfVv4
-kTQe6jbfezFrdx2ex/PmG11aLvt/AgMBAAGjYzBhMB8GA1UdIwQYMBaAFKiTca4X
-Ieivr+kTROR+irHZZKSpMA8GA1UdEwEB/wQFMAMBAf8wDgYDVR0PAQH/BAQDAgEG
-MB0GA1UdDgQWBBSok3GuFyHor6/pE0Tkfoqx2WSkqTANBgkqhkiG9w0BAQsFAAOC
-AQEAZotch4rLe0WWD4endGMqXaZ4jmwdKnhs/8svs7XH9fZ4KNZkIkhz6f5WJMQy
-fQ2hsnDaJy+1xylTsep2fN6CgGRDu8hanUULfLz55FsG8SXZC4CLQ3LRFXKb7o1G
-bW2/0wLTHc1ryspClFfa4QgeDGqu+2FLkunFjKszdox/yRH5IQXdT70dTNh4AEl4
-e/GJxEVD23I+qmq6qPXNGRvJTU5Y55QJcYlLfTDQ9evaIvw1dsLGS0430GBgtO3P
-US0rQ+85UXXVvEtbSzqIGeObLPg22MsSgqNs0kqkwESrNW/UAYphxs95GPvETNmk
-typxIEX0yUxbXNaM6Wx+G53Psg==
------END CERTIFICATE-----
-)EOF";
+
 
 bool connectToMQTT() {
-    mqttClient.setServer(mqttServer, mqttPort);
+    mqttClient.setServer(mqttServer.c_str(), mqttPort);
     mqttClient.setKeepAlive(10);
-    wifiClient.setCACert(rootCA);
+    wifiClient.setCACert(HubTrust::current());
     // wifiClient.setInsecure();
     // mqttClient.setSocketTimeout(5);
     // wifiClient.setTimeout(5000);
 
     Serial.println("Root CA:");
-    Serial.println(rootCA);
+    Serial.println(HubTrust::current());
 
     // Topic
     String _topic = _prefix + hubId + "/status";
 
-    printf("Connecting to MQTT broker at %s:%d...\n", mqttServer, mqttPort);
+    printf("Connecting to MQTT broker at %s:%d...\n", mqttServer.c_str(), mqttPort);
 
     time_t now = time(nullptr);
     Serial.print("TLS system time: ");
@@ -965,9 +961,10 @@ void setup() {
 
     Serial.println("KAGE ESP32 boot successful!");
 
-    // [TESTING ONLY]
+    // [TESTING]
     clearPairedNodes();
-    // clearWiFiCredentials();
+    clearWiFiCredentials();
+    clearTokenAndHubId();
 
     // Read NVS
     hubId = readNVS("HubId");
@@ -976,17 +973,26 @@ void setup() {
     WiFiSSID = readNVS("WiFiSSID");
     WiFiPassword = readNVS("WiFiPassword");
 
+    // Load TLS trust before provisioning or starting the MQTT worker.
+    HubTrust::load();
+    String savedBroker = readNVS("MQTTServer");
+    if (savedBroker.length()) mqttServer = savedBroker;
+    long savedPort = readNVS("MQTTPort").toInt();
+    if (savedPort >= 1 && savedPort <= 65535) mqttPort = savedPort;
+
     // Check for provisioning mode
     if (hubId == "" || hubToken == "" || WiFiSSID == "" || WiFiPassword == "") {
-        // Check for provisioning mode for Hub ID and Token
-        if (hubId == "" || hubToken == "") {
-            provisioningMode_HubCredentials();
-            return; // exit and restart
-        }
-        // Check for provisioning mode for Wi-Fi credentials
-        if (WiFiSSID == "" || WiFiPassword == "") {
-            provisioningMode_WiFiCredentials();
-        }
+        // // Check for provisioning mode for Hub ID and Token
+        // if (hubId == "" || hubToken == "") {
+        //     provisioningMode_HubCredentials();
+        //     return; // exit and restart
+        // }
+        // // Check for provisioning mode for Wi-Fi credentials
+        // if (WiFiSSID == "" || WiFiPassword == "") {
+        //     provisioningMode_WiFiCredentials();
+        // }
+
+        HubProvisioning::start();
 
         return; // exit and restart
     }
@@ -1003,6 +1009,12 @@ void setup() {
 
 
 void loop() {
+
+    // [Handle Hub Provisioning]
+    if (HubProvisioning::active) {
+        HubProvisioning::update();
+        return;
+    }
 
     // To prevent the ESP32 from being overwhelmed by incoming ESP-NOW packets
     processPackets();

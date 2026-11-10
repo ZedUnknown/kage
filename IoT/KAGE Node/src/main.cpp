@@ -3,13 +3,29 @@
 #include <esp_now.h>
 #include <esp_wifi.h>
 #include <KageHNProtocol.h>
+#include <KageNodeButton.h>
+#include <Declarations.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
-#include <singleLEDLibrary.h>
+#include <LEDStates.h>
 
 // [Runtime Variables]
 bool startupComplete = false;
 bool isPendingRequest = false; // Flag to indicate if a pairing request is pending
+
+bool awaitingPairingSavedAck = false;
+uint8_t pairingSavedAttempts = 0;
+unsigned long lastPairingSavedAttempt = 0;
+
+// occupancy runtime
+bool occupancyKnown = false; // sensor state known (first reading to prevent setting occupancy to false on startup)
+bool currentOccupancy = false; // current occupancy state
+bool occupancyPending = false;
+bool occupancyAttempted = false;
+unsigned long lastOccupancyAttempt = 0;
+unsigned long lastOccupancySent = 0;
+constexpr unsigned long OCCUPANCY_RETRY_MS = 1000;
+constexpr unsigned long OCCUPANCY_HEARTBEAT_MS = 15000;
 
 // [NVS Storage]
 Preferences preferences;
@@ -126,6 +142,11 @@ bool clearPairedHub() {
     isPendingRequest = false;
     isPaired = false;
     startupComplete = false;
+    awaitingPairingSavedAck = false;
+
+    occupancyKnown = false;
+    occupancyPending = false;
+    occupancyAttempted = false;
 
     Serial.println("Paired Hub cleared successfully.");
 
@@ -142,7 +163,7 @@ void sendDiscoveryRequest(uint8_t channel) {
     packet.packetType = PacketTypes::PAIRING_REQUEST;
     packet.wifiChannel = channel;
 
-    packet.isOccupied = false; // will be using a global reactive variable later
+    packet.isOccupied = currentOccupancy;
 
     bool sent = sendPacket(
         (const uint8_t*)&BROADCAST_MAC,
@@ -163,7 +184,7 @@ void sendTestPacketRequest(uint8_t channel) {
     packet.packetType = PacketTypes::TEST_PACKET_REQUEST;
     packet.wifiChannel = channel;
 
-    packet.isOccupied = false; // will be using a global reactive variable later
+    packet.isOccupied = currentOccupancy;
 
     uint8_t macBytes[6];
     if (!macStringToBytes(HubMacAddress.c_str(), macBytes)) {
@@ -176,6 +197,51 @@ void sendTestPacketRequest(uint8_t channel) {
         packet
     );
 
+}
+
+
+// [Occupancy]
+// FSR: triggerOccupancy(true or false).
+// Changed readings are sent promptly; unchanged readings use the heartbeat.
+void triggerOccupancy(bool occupied) {
+    if (!occupancyKnown || currentOccupancy != occupied) {
+        occupancyPending = true;
+        // avoid waiting for the next heartbeat if the occupancy state has changed
+        occupancyAttempted = false;
+    }
+    currentOccupancy = occupied;
+    occupancyKnown = true;
+}
+
+void handleOccupancyPacket() {
+    if (!occupancyKnown || !isPaired || !startupComplete || awaitingPairingSavedAck) return;
+
+    // to avoid flooding the Hub with occupancy packets
+    unsigned long now = millis();
+    if (!occupancyPending && now - lastOccupancySent < OCCUPANCY_HEARTBEAT_MS) return;
+    if (occupancyAttempted && now - lastOccupancyAttempt < OCCUPANCY_RETRY_MS) return;
+
+    uint8_t hubMac[6];
+    int channel = HubWiFiChannel.toInt();
+    if (!macStringToBytes(HubMacAddress.c_str(), hubMac) ||
+        channel < 1 || channel > 13 || WiFi.channel() != channel) return;
+
+    // [Packet]
+    ESPNowPacket packet = {};
+    packet.packetType = PacketTypes::DATA_PACKET;
+    packet.isOccupied = currentOccupancy;
+    packet.wifiChannel = channel;
+
+    lastOccupancyAttempt = now;
+    occupancyAttempted = true;
+    if (sendPacket(hubMac, packet)) {
+        occupancyPending = false;
+        lastOccupancySent = millis();
+        Serial.printf("Occupancy sent to Hub: %s\n", currentOccupancy ? "occupied" : "empty");
+    } else {
+        occupancyPending = true;
+        Serial.println("Occupancy send failed. Retrying with the latest reading.");
+    }
 }
 
 
@@ -197,6 +263,7 @@ void getCorrectHubChannel() {
     }
 
     Serial.println("Sending Test Packet to Hub: " + String(HubMacAddress) + " on channel: " + String(currentScanHubChannel));
+    blinkLED(2, false);
 
     // due to the nature of ESP-NOW, the broadcast packets are not guaranteed delivery.
     // therefore, will send multiple discovery requests per channel and wait for a response.
@@ -231,7 +298,6 @@ void getCorrectWiFiChannel() {
     if (isPendingRequest || isPaired) return;
 
     // response is queued by onESPNowReceive and handled by waitForPackets
-
     if (currentScanWiFiChannel > 13) {
         currentScanWiFiChannel = 1;
     }
@@ -242,6 +308,7 @@ void getCorrectWiFiChannel() {
     }
 
     Serial.println("Sending Discovery Request on channel: " + String(currentScanWiFiChannel));
+    blinkLED(1, false);
 
     // due to the nature of ESP-NOW, the broadcast packets are not guaranteed delivery.
     // therefore, will send multiple discovery requests per channel and wait for a response.
@@ -281,7 +348,7 @@ void handlePendingPairing() {
             return;
         }
 
-        if (millis() - lastConfirmationAttempt < 1000) return; // Wait at least 1 second before sending another confirmation
+        if (millis() - lastConfirmationAttempt < 1000) return; // wait at least 1 second before sending another confirmation
 
         uint8_t macBytes[6];
         if (!macStringToBytes(pendingHubMacAddress.c_str(), macBytes)) {
@@ -300,6 +367,38 @@ void handlePendingPairing() {
     }
 }
 
+
+// [PAIRING_SAVED Retries]
+// constexpr = brother of const, but with compile-time evaluation.
+constexpr uint8_t MAX_PAIRING_SAVED_ATTEMPTS = 10;
+constexpr unsigned long PAIRING_SAVED_RETRY_MS = 1000;
+
+void handlePairingSavedRetries() {
+    if (!awaitingPairingSavedAck || !isPaired || !startupComplete) return;
+    if (millis() - lastPairingSavedAttempt < PAIRING_SAVED_RETRY_MS) return;
+    if (pairingSavedAttempts >= MAX_PAIRING_SAVED_ATTEMPTS) {
+        awaitingPairingSavedAck = false;
+        Serial.println("Saved pairing acknowledgement timed out; keeping saved Hub.");
+        return;
+    }
+
+    uint8_t mac[6];
+    int channel = HubWiFiChannel.toInt();
+    if (!macStringToBytes(HubMacAddress.c_str(), mac) ||
+        channel < 1 || channel > 13 || WiFi.channel() != channel) return;
+
+    ESPNowPacket packet = {};
+    packet.packetType = PacketTypes::PAIRING_SAVED;
+    packet.wifiChannel = channel;
+
+    bool isSent = sendPacket(mac, packet);
+    Serial.println(isSent ? "PAIRING_SAVED sent. Awaiting PAIRING_SAVED_ACK." : "Failed to send PAIRING_SAVED. Retrying...");
+
+    pairingSavedAttempts++;
+    lastPairingSavedAttempt = millis();
+}
+
+
 /*
 [ESP-NOW Packet Handler]
 : call by the KageHNProtocol library when an ESP-NOW packet is received.
@@ -308,6 +407,9 @@ void handlePendingPairing() {
     Node ── PAIRING_REQUEST ─────> Hub
     Node <─ PAIRING_RESPONSE ───── Hub
     Node ── PAIRING_CONFIRM ──────> Hub
+    Node <─ PAIRING_COMPLETE ────── Hub
+    Node ── PAIRING_SAVED ────────> Hub
+    Node <─ PAIRING_SAVED_ACK ────── Hub
 
 [CONNECTION TEST]
     Node ── TEST_PACKET_REQUEST ──> Hub
@@ -319,6 +421,7 @@ void handlePendingPairing() {
 [UNPAIR]
     Either ── UNPAIR_REQUEST ─────> Other
     Either <─ UNPAIR_RESPONSE ───── Other
+    Either ── UNPAIR_RESPONSE_ACK ─> Other
 */
 
 void packetHandler(
@@ -379,10 +482,15 @@ void packetHandler(
 
         case PacketTypes::PAIRING_COMPLETE: {
             Serial.println("PAIRING_COMPLETE");
-            // if (HubMacAddress != String(macString)) break;
+            if (receivedPacket.wifiChannel < 1 || receivedPacket.wifiChannel > 13) break;
+            if (isPaired && HubMacAddress == String(macString) &&
+                HubWiFiChannel.toInt() == receivedPacket.wifiChannel) {
+                // Duplicate completion: retry the saved notification without another NVS write.
+                handlePairingSavedRetries();
+                break;
+            }
             if (!isPendingRequest || pendingHubMacAddress != String(macString)) break;
             if (pendingHubWiFiChannel.toInt() != receivedPacket.wifiChannel) break;
-            if (receivedPacket.wifiChannel < 1 || receivedPacket.wifiChannel > 13) break;
 
             // Set the WiFi channel to the one provided by the Hub.
             if (!setRadioChannel(receivedPacket.wifiChannel)) break;
@@ -399,6 +507,13 @@ void packetHandler(
                 startupComplete = true; // not necessary, but just to be safe
                 Serial.println("Paired Hub saved successfully.");
 
+                // Start sending PAIRING_SAVED to the Hub and wait for its ACK.
+                awaitingPairingSavedAck = true;
+                pairingSavedAttempts = 0;
+                lastPairingSavedAttempt = millis() - PAIRING_SAVED_RETRY_MS;
+                handlePairingSavedRetries();
+                break;
+
             } else {
                 Serial.println("Failed to save paired Hub.");
             }
@@ -407,9 +522,11 @@ void packetHandler(
         }
 
         case PacketTypes::PAIRING_SAVED_ACK: {
-            if (isPaired && HubMacAddress == String(macString) &&
+            if (awaitingPairingSavedAck && isPaired && HubMacAddress == String(macString) &&
                 HubWiFiChannel.toInt() == receivedPacket.wifiChannel) {
+                awaitingPairingSavedAck = false;
                 Serial.println("Hub acknowledged saved pairing.");
+                blinkLED(3);
             }
             break;
         }
@@ -418,16 +535,28 @@ void packetHandler(
         case PacketTypes::UNPAIR_REQUEST: {
             Serial.println("UNPAIR_REQUEST");
             if (HubMacAddress != String(macString)) break;
+            // The response must prove that the Node's NVS deletion succeeded.
+            if (!clearPairedHub()) break;
             ESPNowPacket _receivedPacket = receivedPacket;
             _receivedPacket.packetType = PacketTypes::UNPAIR_RESPONSE;
-            if (sendPacket(macAddress, _receivedPacket)) clearPairedHub();
+            if (!sendPacket(macAddress, _receivedPacket)) {
+                Serial.println("Failed to send UNPAIR_RESPONSE to Hub.");
+            }
             break;
         }
         case PacketTypes::UNPAIR_RESPONSE: {
             Serial.println("UNPAIR_RESPONSE");
-            if (HubMacAddress == String(macString)) {
-                clearPairedHub();
+            if (HubMacAddress != String(macString)) break;
+            if (!clearPairedHub()) break;
+            ESPNowPacket ack = {};
+            ack.packetType = PacketTypes::UNPAIR_RESPONSE_ACK;
+            if (!sendPacket(macAddress, ack)) {
+                Serial.println("Failed to send UNPAIR_RESPONSE_ACK to Hub.");
             }
+            break;
+        }
+        case PacketTypes::UNPAIR_RESPONSE_ACK: {
+            Serial.println("UNPAIR_RESPONSE_ACK: Hub persisted the unpairing.");
             break;
         }
         // received from Hub after the Node sends a test packet to check if the Hub is on the correct channel
@@ -444,6 +573,23 @@ void packetHandler(
                 startupComplete = true;
                 isPaired = true;
             }
+
+            break;
+        }
+
+        // received from Hub when it wants to identify the Node
+        case PacketTypes::TEST_PACKET_REQUEST: {
+            Serial.println("TEST_PACKET_REQUEST");
+            if (HubMacAddress != String(macString)) break;
+            if (receivedPacket.wifiChannel < 1 || receivedPacket.wifiChannel > 13) break;
+
+            ESPNowPacket response = {};
+            response.packetType = PacketTypes::TEST_PACKET_RESPONSE;
+            response.wifiChannel = receivedPacket.wifiChannel;
+            sendPacket(macAddress, response);
+
+            // Identify the Node by blinking the LED
+            identifyLED();
 
             break;
         }
@@ -488,43 +634,42 @@ void startNode(String _HubMacAddress, String _HubWiFiChannel) {
     }
 };
 
+// ==========[PINS]==========
+uint8_t ledPin = 7; // Pin for the LED
+uint8_t buttonPin = 8; // Pin for the button
+
 // ======================================================================
-
-sllib LED(0);
-
-TaskHandle_t ledTaskHandle = nullptr;
-void unInturuptedLoop(void* parameter) {
-    while (true) {
-        LED.update();
-        delay(1);
-    }
-}
 
 void setup() {
     Serial.begin(115200); // Serial communication at 115200 baud
+
+    // Start rendering before the serial wait or any finite effect timers.
+    if (!setupLED(ledPin)) {
+        Serial.println("Failed to create LED update task. Restarting...");
+        ESP.restart();
+        return;
+    }
+    finiteBreathLED(800, 3);
     delay(3000); // Wait for Serial to initialize
 
     Serial.println("KAGE ESP32-C3 boot successful!");
+    Serial.println("Mock occupancy: send 1 for occupied, 0 for empty, or ? for help.");
 
-    // Initialize LED
-    int pattern[] = {300, 500};
-    LED.setPatternSingle(pattern, 2);
-
-    if (xTaskCreate(
-        unInturuptedLoop, // Task function
-        "LED Update Task", // Task name
-        1024,
-        NULL, // Task input parameter
-        1, // Task priority
-        &ledTaskHandle // Task handle
-    ) != pdPASS) Serial.println("Failed to create LED update task.");
+    // [Register Pin Modes]
+    pinMode(buttonPin, INPUT_PULLUP);
 
     // [TESTING ONLY]
     clearPairedHub();
+    clearPendingPairing();
 
     // Read NVS
     String nvsReadResult = readNVS();
     Serial.println(nvsReadResult);
+    if (HubMacAddress != "" && HubWiFiChannel != "") {
+        awaitingPairingSavedAck = true;
+        pairingSavedAttempts = 0;
+        lastPairingSavedAttempt = millis() - PAIRING_SAVED_RETRY_MS;
+    }
 
     // Setup ESP-NOW Packet Handler
     setupPacketHandler(packetHandler);
@@ -576,6 +721,45 @@ void setup() {
 
 void loop() {
 
+    // [Handle Button Hold]
+    handleButtonHold(
+        buttonPin,
+        []() {
+            Serial.println("Button Identifying Node.");
+            sendTestPacketRequest(WiFi.channel());
+            identifyLED();
+        },
+        []() {
+            Serial.println("Button No Action.");
+        },
+        []() {
+            Serial.println("Button Clearing paired Hub.");
+            blinkLED(10);
+            clearPairedHub();
+            clearPendingPairing();
+            currentScanHubChannel = 1;
+            currentScanWiFiChannel = 1;
+        }
+    );
+
+    // [Handle Button Press]
+    handleButtonPress(
+        buttonPin,
+        []() { // Single Press
+            Serial.println("Button Pressed: Once.");
+            blinkLED(1);
+            triggerOccupancy(!currentOccupancy);
+        },
+        []() { // Double Press
+            Serial.println("Button Pressed: Twice.");
+            blinkLED(2);
+        },
+        []() { // Triple Press
+            Serial.println("Button Pressed: Thrice.");
+            blinkLED(3);
+        }
+    );
+
     // [Process Incoming Packets]
     processPackets();
 
@@ -583,12 +767,16 @@ void loop() {
     handlePendingPairing();
 
     isPaired = !(HubMacAddress == "" || HubWiFiChannel == "");
+    handlePairingSavedRetries();
+
+    // [Handle Occupancy Packet]
+    handleOccupancyPacket(); // triggered by triggerOccupancy()
 
     if (!isPaired && !isPendingRequest) {
         handlePairing();
-    } else {
-        LED.setOnSingle();
     }
 
-    delay(1);
+    setBackgroundLED(!isPaired && !isPendingRequest);
+
+    delay(100); // to save power
 }

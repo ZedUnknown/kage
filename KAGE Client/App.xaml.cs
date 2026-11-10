@@ -16,9 +16,10 @@ public partial class App : Application {
             SetupWindow setupWindow = new SetupWindow();
             setupWindow.Show();
         } else {
-            if (config.ServerAddress == null || config.ServerAddress.Trim() == "") {
-                // If the server address is not configured, show the setup window
-                SetupWindow setupWindow = new SetupWindow();
+            if (config.RequiresSetup || !MqttAddress.IsValid(config.Mqtt) || !MqttAddress.IsTopicId(config.HubId) || !MqttAddress.IsTopicId(config.PcId)) {
+                // MQTT configuration is the only connection required at startup.
+                SetupWindow setupWindow = new SetupWindow(config.Mqtt, config.RequiresSetup
+                    ? "The saved Client connection needs setup again. Check its credentials and broker permissions." : null);
                 setupWindow.Show();
                 return;
             }

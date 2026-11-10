@@ -3,11 +3,14 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <PubSubClient.h> // MQTT client library
+#include <cJSON.h>
+#include <sys/time.h>
 #include <KageHNProtocol.h>
 #include <Declarations.h>
 #include <SyncTime.h>
+#include <HubProvisioning.h>
 
-String _prefix = "kage/hub/";
+String live_prefix = "kage/hub/live/";
 
 // [NVS Variables]
 // : Hub ID and Token
@@ -17,6 +20,10 @@ String hubToken;
 // : Wi-Fi Credentials
 String WiFiSSID;
 String WiFiPassword;
+
+// : MQTT Server and Port
+String mqttServer;
+int mqttPort;
 
 // : Paired Nodes List
 const int MAX_PAIRED_NODES = 100;
@@ -179,6 +186,7 @@ bool addPairedNode(const char* macAddress) {
     return addPairedNode(macBytes);
 }
 
+
 // [Clear Paired Nodes]
 void clearPairedNodes() {
     preferences.begin("kage", false);
@@ -215,6 +223,41 @@ void clearWiFiCredentials() {
 
     Serial.println("TEST: Wi-Fi credentials cleared.");
 }
+
+// [Clear Token and Hub ID]
+void clearTokenAndHubId() {
+    preferences.begin("kage", false);
+
+    // Remove Hub ID and Token from NVS
+    preferences.remove("HubId");
+    preferences.remove("HubToken");
+
+    preferences.end();
+
+    // Clear runtime copy
+    hubId = "";
+    hubToken = "";
+
+    Serial.println("TEST: Hub ID and Token cleared.");
+}
+
+// [Clear MQTT Credentials]
+void clearMQTTCredentials() {
+    preferences.begin("kage", false);
+
+    // Remove MQTT credentials from NVS
+    preferences.remove("MQTTServer");
+    preferences.remove("MQTTPort");
+
+    preferences.end();
+
+    // Clear runtime copy
+    mqttServer = "";
+    mqttPort = 0;
+
+    Serial.println("TEST: MQTT credentials cleared.");
+}
+
 
 bool isEmptyMac(const uint8_t* macAddress) {
     const uint8_t emptyMac[6] = {
@@ -403,50 +446,30 @@ QueueHandle_t mqttIncoming = nullptr;
 QueueHandle_t mqttOutgoing = nullptr;
 std::atomic<bool> mqttOnline{false};
 std::atomic<uint32_t> mqttCommandDrops{0};
+// Fresh presence lets the admin worker recover after it reconnects. Retained
+// startup status alone is deliberately not treated as live presence by KAGE.
+const unsigned long mqttStatusInterval = 15000;
+unsigned long mqttStatusLastSentAt = 0;
 
-const char* mqttServer = "192.168.1.23";
-const int mqttPort = 8883;
-
-const char* rootCA = R"EOF(
------BEGIN CERTIFICATE-----
-MIIDnzCCAoegAwIBAgIUC77zMrXUv4qytH+qLel6ETXC8v8wDQYJKoZIhvcNAQEL
-BQAwVzEcMBoGA1UECgwTQXJhc2FrYSBDb3Jwb3JhdGlvbjEfMB0GA1UECwwWS0FH
-RSBXb3Jrc3BhY2UgU3lzdGVtczEWMBQGA1UEAwwNS0FHRSBMb2NhbCBDQTAeFw0y
-NjEwMTAyMjM4MDFaFw0zNjEwMDcyMjM4MDFaMFcxHDAaBgNVBAoME0FyYXNha2Eg
-Q29ycG9yYXRpb24xHzAdBgNVBAsMFktBR0UgV29ya3NwYWNlIFN5c3RlbXMxFjAU
-BgNVBAMMDUtBR0UgTG9jYWwgQ0EwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEK
-AoIBAQDoLjlSSYIHaqDMqSNpKA+D4xMUvL+/L92dJ9mb2b4LsXj67fRiQ9tuAqZY
-khBMDW/NaKnUM7kh45LeYKHcMbLrEDFyXTaZ+5/HiNwN5k9zPE5FojDPTnItJL/N
-nWOCtvdnn2KFiW46sHsznodpumQDVTf7nw9BFRh0FG4STs2wxt+qS4ql/dxUwPBL
-kulZ7MrqPcbvVnQtzVQfAjw/E3vFkuOAch6apGfePq7IyRVPUfck0x3T6n4ZExTv
-Av4nBYqAy/duiXcfjlyxuJ3SIT5fjz/LzeJ2wmPlVEoL1H5+AbgB4PcS1PJNfVv4
-kTQe6jbfezFrdx2ex/PmG11aLvt/AgMBAAGjYzBhMB8GA1UdIwQYMBaAFKiTca4X
-Ieivr+kTROR+irHZZKSpMA8GA1UdEwEB/wQFMAMBAf8wDgYDVR0PAQH/BAQDAgEG
-MB0GA1UdDgQWBBSok3GuFyHor6/pE0Tkfoqx2WSkqTANBgkqhkiG9w0BAQsFAAOC
-AQEAZotch4rLe0WWD4endGMqXaZ4jmwdKnhs/8svs7XH9fZ4KNZkIkhz6f5WJMQy
-fQ2hsnDaJy+1xylTsep2fN6CgGRDu8hanUULfLz55FsG8SXZC4CLQ3LRFXKb7o1G
-bW2/0wLTHc1ryspClFfa4QgeDGqu+2FLkunFjKszdox/yRH5IQXdT70dTNh4AEl4
-e/GJxEVD23I+qmq6qPXNGRvJTU5Y55QJcYlLfTDQ9evaIvw1dsLGS0430GBgtO3P
-US0rQ+85UXXVvEtbSzqIGeObLPg22MsSgqNs0kqkwESrNW/UAYphxs95GPvETNmk
-typxIEX0yUxbXNaM6Wx+G53Psg==
------END CERTIFICATE-----
-)EOF";
 
 bool connectToMQTT() {
-    mqttClient.setServer(mqttServer, mqttPort);
+    if (!HubTrust::configured()) {
+        Serial.println("MQTT requires a saved root CA. Configure it in Hub setup.");
+        return false;
+    }
+    mqttClient.setServer(mqttServer.c_str(), mqttPort);
     mqttClient.setKeepAlive(10);
-    wifiClient.setCACert(rootCA);
+    wifiClient.setCACert(HubTrust::current());
     // wifiClient.setInsecure();
     // mqttClient.setSocketTimeout(5);
     // wifiClient.setTimeout(5000);
 
-    Serial.println("Root CA:");
-    Serial.println(rootCA);
+    Serial.println("TLS trust: saved root CA");
 
     // Topic
-    String _topic = _prefix + hubId + "/status";
+    String _topic = live_prefix + hubId + "/status";
 
-    printf("Connecting to MQTT broker at %s:%d...\n", mqttServer, mqttPort);
+    printf("Connecting to MQTT broker at %s:%d...\n", mqttServer.c_str(), mqttPort);
 
     time_t now = time(nullptr);
     Serial.print("TLS system time: ");
@@ -475,6 +498,7 @@ bool connectToMQTT() {
 
             // Deploy subscriptions before publishing
             deploySubscriptions();
+            mqttStatusLastSentAt = millis() - mqttStatusInterval;
 
             // Publish "online" status to the topic
             bool isPublished = mqttPublish(
@@ -503,6 +527,10 @@ bool connectToMQTT() {
             int state = mqttClient.state();
             Serial.println(state);
 
+            char tlsError[160] = {};
+            int tlsCode = wifiClient.lastError(tlsError, sizeof(tlsError));
+            if (tlsCode != 0) Serial.printf("TLS error %d: %s\n", tlsCode, tlsError);
+
             if (state == 4 || state == 5) {
                 Serial.println("MQTT credentials rejected; retaining radio and pairing state.");
             } else {
@@ -520,7 +548,80 @@ bool mqttAttempted = false;
 unsigned long lastMQTTAttemptFinished = 0;
 int mqttReconnectAttempts = 0;
 
+// validate the admin server through MQTT once at startup, 3 attempts
+const int mqttPingMaxAttempts = 3;
+const unsigned long mqttPingTimeout = 5000;
+
+enum class MQTTPingStatus {
+    NotStarted,
+    Waiting,
+    RetryDelay,
+    Passed,
+    Failed,
+    Provisioning
+};
+
+// MQTT worker owns the count and timer, and is the only task changing status.
+int mqttPingAttempts = 0;
+unsigned long mqttPingStartedAt = 0;
+bool mqttBrokerReached = false;
+char mqttPingRequestId[33] = {};
+const unsigned long mqttAdminRetryDelay = 30000;
+std::atomic<MQTTPingStatus> mqttPingStatus{MQTTPingStatus::NotStarted};
+
 void checkMQTTConnection() {
+    if (mqttPingStatus != MQTTPingStatus::Passed) {
+        if (mqttPingStatus == MQTTPingStatus::RetryDelay) {
+            if (mqttClient.connected()) mqttClient.loop();
+            if (millis() - mqttPingStartedAt < mqttAdminRetryDelay) return;
+            mqttPingAttempts = 0;
+            mqttPingStatus = MQTTPingStatus::NotStarted;
+        }
+        if (mqttPingStatus == MQTTPingStatus::Waiting) {
+            if (mqttClient.connected()) mqttClient.loop();
+            if (mqttPingStatus == MQTTPingStatus::Passed) return;
+            if (millis() - mqttPingStartedAt < mqttPingTimeout) return;
+
+            mqttPingStatus = MQTTPingStatus::NotStarted;
+            Serial.println("MQTT ping attempt failed: no valid KAGE response.");
+            if (mqttPingAttempts >= mqttPingMaxAttempts) {
+                if (mqttBrokerReached) {
+                    Serial.println("Broker login succeeded but KAGE admin did not reply. Retrying in 30 seconds.");
+                    mqttPingStartedAt = millis();
+                    mqttPingStatus = MQTTPingStatus::RetryDelay;
+                    return;
+                }
+                mqttPingStatus = MQTTPingStatus::Failed;
+                return;
+            }
+        }
+
+        // Wi-Fi and clock failures are handled by their existing recovery paths.
+        if (WiFi.status() != WL_CONNECTED || !syncTime()) return;
+
+        ++mqttPingAttempts;
+        Serial.printf("MQTT ping attempt %d/%d\n", mqttPingAttempts, mqttPingMaxAttempts);
+        bool connected = connectToMQTT();
+        mqttPingStartedAt = millis();
+        mqttPingStatus = MQTTPingStatus::Waiting;
+        if (connected) {
+            mqttBrokerReached = true;
+
+            // Give this ping a new ID so we can match its reply.
+            const char hexDigits[] = "0123456789abcdef";
+            for (int i = 0; i < 32; i++) {
+                mqttPingRequestId[i] = hexDigits[esp_random() % 16];
+            }
+            mqttPingRequestId[32] = '\0';
+
+            String request = String("{\"request_id\":\"") + mqttPingRequestId + "\"}";
+            if (!mqttPublish(live_prefix + hubId + "/ping_request", request)) {
+                Serial.println("MQTT ping could not be queued.");
+            }
+        }
+        return;
+    }
+
     if (WiFi.status() == WL_CONNECTED && syncTime()) {
         if (mqttClient.connected()) {
             if (mqttAttempted) Serial.println("MQTT connected successfully.");
@@ -545,19 +646,6 @@ void checkMQTTConnection() {
             mqttClient.loop();
         }
     }
-}
-
-// [Deploy Subscriptions]
-void deploySubscriptions() {
-    // Pairing Request Confirmation
-    String pairingTopic = _prefix + hubId + "/pairing_response/+";
-    // + is a wildcard for the Node's MAC address
-    mqttSubscribe(pairingTopic);
-
-    // Unpair Request
-    String unpairTopic = _prefix + hubId + "/unpair_response/+";
-    // + is a wildcard for the Node's MAC address
-    mqttSubscribe(unpairTopic);
 }
 
 // [MQTT Utils]
@@ -602,6 +690,12 @@ void mqttListener(char* topic, byte* payload, unsigned int length) {
     }
     strcpy(message.topic, topic);
     memcpy(message.payload, payload, length);
+    if (String(topic) == live_prefix + hubId + "/ping_response") {
+        // Keep ping state changes on the MQTT worker. Other commands remain
+        // queued for the main loop, which owns pairing and NVS operations.
+        handleMQTTMessage(String(message.topic), String(message.payload));
+        return;
+    }
     if (xQueueSend(mqttIncoming, &message, 0) != pdTRUE) ++mqttCommandDrops;
 }
 
@@ -610,8 +704,23 @@ void mqttWorker(void*) {
     bool havePending = false;
     for (;;) {
         checkMQTTConnection();
+        if (mqttPingStatus == MQTTPingStatus::Failed) {
+            // Stop socket access before the main loop switches Wi-Fi into
+            // provisioning mode. Saved credentials remain available.
+            mqttClient.disconnect();
+            mqttOnline.store(false);
+            mqttPingStatus = MQTTPingStatus::Provisioning;
+            vTaskDelete(nullptr);
+            return;
+        }
         mqttOnline.store(WiFi.status() == WL_CONNECTED && mqttClient.connected());
         if (mqttOnline.load()) {
+            if (millis() - mqttStatusLastSentAt >= mqttStatusInterval) {
+                String statusTopic = live_prefix + hubId + "/status";
+                if (mqttClient.publish(statusTopic.c_str(), "online", false)) {
+                    mqttStatusLastSentAt = millis();
+                }
+            }
             if (!havePending) havePending = xQueueReceive(mqttOutgoing, &pending, 0) == pdTRUE;
             if (havePending && mqttClient.publish(pending.topic, pending.payload, pending.retained)) {
                 Serial.println("Published to topic: " + String(pending.topic) + " | Payload: " + String(pending.payload));
@@ -631,10 +740,134 @@ void processMQTTCommands() {
     }
 }
 
+// [Deploy Subscriptions]
+void deploySubscriptions() {
+    // Pairing Request Confirmation
+    String pairingTopic = live_prefix + hubId + "/pairing_response/+";
+    mqttSubscribe(pairingTopic); // + is a wildcard for the Node's MAC address
+
+    // Unpair Request
+    String unpairTopic = live_prefix + hubId + "/unpair_response/+";
+    mqttSubscribe(unpairTopic); // + is a wildcard for the Node's MAC address
+
+    // Ping Response
+    String pingResponseTopic = live_prefix + hubId + "/ping_response";
+    mqttSubscribe(pingResponseTopic);
+
+    // One command topic per Hub; the target Node MAC is in the JSON payload.
+    String identifyTopic = live_prefix + hubId + "/identify";
+    mqttSubscribe(identifyTopic);
+}
+
+
+// [Handle MQTT Messages from Subscriptions]
 void handleMQTTMessage(const String& topic, const String& message) {
+
+    if (topic == live_prefix + hubId + "/ping_response") {
+        if (mqttPingStatus != MQTTPingStatus::Waiting) return;
+
+        cJSON* response = cJSON_ParseWithOpts(message.c_str(), nullptr, true);
+        const cJSON* data = cJSON_GetObjectItemCaseSensitive(response, "data");
+        const cJSON* key = cJSON_GetObjectItemCaseSensitive(data, "key");
+        const cJSON* requestId = cJSON_GetObjectItemCaseSensitive(response, "request_id");
+        bool valid = cJSON_IsObject(data) && cJSON_IsString(key) &&
+            strcmp(key->valuestring, "KAGE") == 0 && cJSON_IsString(requestId) &&
+            mqttPingRequestId[0] != '\0' && strcmp(requestId->valuestring, mqttPingRequestId) == 0;
+        cJSON_Delete(response);
+
+        if (valid) {
+            mqttPingStatus = MQTTPingStatus::Passed;
+            Serial.println("MQTT ping validated: KAGE admin server is running.");
+        } else {
+            Serial.println("Invalid MQTT ping response; expected KAGE and the current request_id.");
+        }
+        return;
+    }
+
+    // [ Handle identify command ]
+    // : kage/hub/<hubId>/identify
+    if (topic == live_prefix + hubId + "/identify") {
+        cJSON* command = cJSON_ParseWithOpts(message.c_str(), nullptr, true);
+        const cJSON* version = cJSON_GetObjectItemCaseSensitive(command, "version");
+        const cJSON* mac = cJSON_GetObjectItemCaseSensitive(command, "mac_address");
+        const cJSON* id = cJSON_GetObjectItemCaseSensitive(command, "command_id");
+        const cJSON* deadline = cJSON_GetObjectItemCaseSensitive(command, "deadline");
+
+        bool validId = cJSON_IsString(id) && id->valuestring[0] != '\0' && strlen(id->valuestring) <= 64;
+        if (validId) {
+            for (const char* p = id->valuestring; *p; ++p) {
+                if (!isalnum((unsigned char)*p) && *p != '-' && *p != '_' && *p != '.') {
+                    validId = false;
+                    break;
+                }
+            }
+        }
+
+        uint8_t macBytes[6] = {};
+        bool validMac = cJSON_IsString(mac) && macStringToBytes(mac->valuestring, macBytes);
+        const char* status = "rejected";
+        const char* reason = nullptr;
+
+        if (!cJSON_IsObject(command)) {
+            reason = "invalid_json";
+        } else if (!validId) {
+            reason = "invalid_command_id";
+        } else if (!cJSON_IsNumber(version) || version->valuedouble != 1) {
+            reason = "unsupported_version";
+        } else if (!validMac) {
+            reason = "invalid_mac_address";
+        } else if (!cJSON_IsNumber(deadline) || !isfinite(deadline->valuedouble) ||
+                deadline->valuedouble <= 0 || deadline->valuedouble > 9007199254740991.0 ||
+                floor(deadline->valuedouble) != deadline->valuedouble) {
+            reason = "invalid_deadline";
+        } else if (!isNodePaired(macBytes)) {
+            reason = "node_not_paired";
+        } else {
+            time_t now = time(nullptr);
+            if (now < 1700000000) {
+                reason = "clock_not_synchronized";
+            } else if (deadline->valuedouble <= (double)now) {
+                reason = "deadline_expired";
+            } else {
+                // The current Node firmware identifies on TEST_PACKET_REQUEST.
+                // Command ID and deadline remain Hub-side until dedicated packets exist.
+                ESPNowPacket request = {};
+                request.packetType = PacketTypes::TEST_PACKET_REQUEST;
+                request.wifiChannel = WiFi.channel();
+                if (sendPacket(macBytes, request)) {
+                    status = "dispatched";
+                } else {
+                    status = "delivery_failed";
+                    reason = "radio_send_failed";
+                }
+            }
+        }
+
+        cJSON* result = cJSON_CreateObject();
+        if (result != nullptr) {
+            cJSON_AddNumberToObject(result, "version", 1);
+            if (validId) cJSON_AddStringToObject(result, "command_id", id->valuestring);
+            if (validMac) {
+                char canonicalMac[18];
+                macBytesToString(macBytes, canonicalMac, sizeof(canonicalMac));
+                cJSON_AddStringToObject(result, "mac_address", canonicalMac);
+            }
+            cJSON_AddStringToObject(result, "status", status);
+            if (reason != nullptr) cJSON_AddStringToObject(result, "reason", reason);
+            char* payload = cJSON_PrintUnformatted(result);
+            if (payload != nullptr) {
+                mqttPublish(live_prefix + hubId + "/identify_result", String(payload));
+                cJSON_free(payload);
+            }
+            cJSON_Delete(result);
+        }
+        cJSON_Delete(command);
+        return;
+    }
+
     // [ Handle pairing response ]
     // : kage/hub/<hubId>/pairing_response/AA:BB:CC:DD:EE:FF
-    String pairingResponsePrefix = _prefix + hubId + "/pairing_response/";
+    String pairingResponsePrefix = live_prefix + hubId + "/pairing_response/";
     if (topic.startsWith(pairingResponsePrefix)) {
         String nodeMacAddress = topic.substring(pairingResponsePrefix.length());
         Serial.println("Received pairing response from Node MAC: " + nodeMacAddress);
@@ -666,8 +899,8 @@ void handleMQTTMessage(const String& topic, const String& message) {
 
     // [ Handle unpair response ]
     // : kage/hub/<hubId>/unpair_response/AA:BB:CC:DD:EE:FF
-    else if (topic.startsWith(_prefix + hubId + "/unpair_response/")) {
-        String nodeMacAddress = topic.substring((_prefix + hubId + "/unpair_response/").length());
+    else if (topic.startsWith(live_prefix + hubId + "/unpair_response/")) {
+        String nodeMacAddress = topic.substring((live_prefix + hubId + "/unpair_response/").length());
         Serial.println("Received unpair response from Node MAC: " + nodeMacAddress);
 
         Serial.println("Handling unpair response: " + message);
@@ -691,21 +924,9 @@ void handleMQTTMessage(const String& topic, const String& message) {
 
             // Revoke any pending pairing approval even if the node is unreachable.
             if (isNodeApproved(macBytes)) removeApprovedNodeMac(macBytes);
-            // if (success) {
-            //     if (!removePairedNode(macBytes)) {
-            //         Serial.println("Failed to remove paired Node or Node was already unpaired.");
-            //     }
-            // } else Serial.println("Failed to send UNPAIR_RESPONSE packet to Node.");
             if (success) {
-                if (removePairedNode(macBytes)) {
-                    String topic = _prefix + hubId + "/unpair_confirm";
-                    String payload =
-                        "{\"mac_address\":\"" + nodeMacAddress + "\"}";
-
-                    mqttPublish(topic, payload);
-                } else {
-                    Serial.println("Failed to remove paired Node or already unpaired.");
-                }
+                // Radio delivery does not prove that the Node cleared NVS.
+                Serial.println("Waiting for UNPAIR_RESPONSE_ACK from Node.");
             } else {
                 Serial.println("Failed to send UNPAIR_RESPONSE packet to Node.");
             }
@@ -729,6 +950,9 @@ void handleMQTTMessage(const String& topic, const String& message) {
     Node ── PAIRING_REQUEST ─────> Hub
     Node <─ PAIRING_RESPONSE ───── Hub
     Node ── PAIRING_CONFIRM ──────> Hub
+    Node <─ PAIRING_COMPLETE ────── Hub
+    Node ── PAIRING_SAVED ────────> Hub
+    Node <─ PAIRING_SAVED_ACK ────── Hub
 
 [CONNECTION TEST]
     Node ── TEST_PACKET_REQUEST ──> Hub
@@ -740,6 +964,7 @@ void handleMQTTMessage(const String& topic, const String& message) {
 [UNPAIR]
     Either ── UNPAIR_REQUEST ─────> Other
     Either <─ UNPAIR_RESPONSE ───── Other
+    Either <─ UNPAIR_RESPONSE_ACK ───── Other
 */
 
 void packetHandler(
@@ -792,7 +1017,7 @@ void packetHandler(
                 break;
             }
             // Show pairing request to the admin via MQTT
-            String pairingTopic = _prefix + hubId + "/pairing_request";
+            String pairingTopic = live_prefix + hubId + "/pairing_request";
 
             // Create a JSON payload with the MAC address of the Node
             String pairingPayload =
@@ -843,7 +1068,7 @@ void packetHandler(
             Serial.println("PAIRING_SAVED");
             if (!isNodePaired(macAddress)) break;
             if (receivedPacket.wifiChannel != WiFi.channel()) break;
-            String pairingConfirmTopic = _prefix + hubId + "/pairing_confirm";
+            String pairingConfirmTopic = live_prefix + hubId + "/pairing_confirm";
 
             String pairingConfirmPayload =
                 "{\"mac_address\":\"" +
@@ -865,7 +1090,7 @@ void packetHandler(
         case PacketTypes::UNPAIR_REQUEST: {
             Serial.println("UNPAIR_REQUEST");
             // need admin confirmation if the Node is allowed to unpair from the Hub
-            String unpairTopic = _prefix + hubId + "/unpair_request";
+            String unpairTopic = live_prefix + hubId + "/unpair_request";
             String unpairPayload =
                 "{\"mac_address\":\"" +
                 String(macString) +
@@ -875,13 +1100,22 @@ void packetHandler(
             break;
         }
 
-        case PacketTypes::UNPAIR_RESPONSE: {
-            Serial.println("UNPAIR_RESPONSE");
+        case PacketTypes::UNPAIR_RESPONSE:
+        case PacketTypes::UNPAIR_RESPONSE_ACK: {
+            const bool needsAck = receivedPacket.packetType == PacketTypes::UNPAIR_RESPONSE;
+            Serial.println(needsAck ? "UNPAIR_RESPONSE" : "UNPAIR_RESPONSE_ACK");
             // remove the Node's MAC address from the NVS list of paired Nodes
             if (!removePairedNode(macAddress)) break;
             if (isNodeApproved(macAddress)) if (!removeApprovedNodeMac(macAddress)) break;
-            // just inform the admin server that the Node has successfully unpaired with the Hub
-            String unpairConfirmTopic = _prefix + hubId + "/unpair_confirm";
+            if (needsAck) {
+                ESPNowPacket ack = {};
+                ack.packetType = PacketTypes::UNPAIR_RESPONSE_ACK;
+                if (!sendPacket(macAddress, ack)) {
+                    Serial.println("Failed to send UNPAIR_RESPONSE_ACK to Node.");
+                }
+            }
+            // The Node sends either response only after clearing its own NVS.
+            String unpairConfirmTopic = live_prefix + hubId + "/unpair_confirm";
             String unpairConfirmPayload =
                 "{\"mac_address\":\"" +
                 String(macString) +
@@ -908,14 +1142,40 @@ void packetHandler(
         }
 
         // used by Node to send data to the Hub
-        case PacketTypes::DATA_PACKET:
+        case PacketTypes::DATA_PACKET: {
             Serial.println("DATA_PACKET");
-            if (isNodePaired(macAddress)) {
-                Serial.println("Data received from paired Node: " + String(macString));
-            } else {
-                Serial.println("Data received from unpaired Node: " + String(macString));
+            if (!isNodePaired(macAddress)) {
+                Serial.println("Ignoring occupancy from unpaired Node: " + String(macString));
+                break;
             }
+            if (receivedPacket.wifiChannel != WiFi.channel()) {
+                Serial.println("Ignoring occupancy with an invalid WiFi channel.");
+                break;
+            }
+            Serial.printf("Node %s occupancy: %s\n", macString,
+                          receivedPacket.isOccupied ? "occupied" : "empty");
+            // Do not queue old sensor readings while the broker is disconnected.
+            // The Node repeats its latest reading every 15 seconds.
+            if (!mqttOnline.load()) {
+                Serial.println("Occupancy not forwarded: MQTT is offline.");
+                break;
+            }
+            timeval observed = {};
+            gettimeofday(&observed, nullptr);
+            if (observed.tv_sec < 1700000000) {
+                Serial.println("Occupancy not forwarded: UTC clock is not synchronized.");
+                break;
+            }
+            char observedAtMs[24];
+            snprintf(observedAtMs, sizeof(observedAtMs), "%llu",
+                static_cast<unsigned long long>(observed.tv_sec) * 1000ULL + observed.tv_usec / 1000);
+            String occupancyTopic = live_prefix + hubId + "/occupancy/" + String(macString) +
+                "/" + (receivedPacket.isOccupied ? "occupied" : "empty");
+            bool queued = mqttPublish(occupancyTopic, String(observedAtMs), false);
+            Serial.println(queued ? "Occupancy queued for admin server: " + occupancyTopic :
+                                   "Occupancy could not be queued for admin server: " + occupancyTopic);
             break;
+        }
 
         default:
             Serial.println("UNKNOWN");
@@ -965,9 +1225,10 @@ void setup() {
 
     Serial.println("KAGE ESP32 boot successful!");
 
-    // [TESTING ONLY]
-    clearPairedNodes();
+    // [DEBUGGING]
+    // clearPairedNodes();
     // clearWiFiCredentials();
+    // clearTokenAndHubId();
 
     // Read NVS
     hubId = readNVS("HubId");
@@ -976,20 +1237,29 @@ void setup() {
     WiFiSSID = readNVS("WiFiSSID");
     WiFiPassword = readNVS("WiFiPassword");
 
-    // Check for provisioning mode
-    if (hubId == "" || hubToken == "" || WiFiSSID == "" || WiFiPassword == "") {
-        // Check for provisioning mode for Hub ID and Token
-        if (hubId == "" || hubToken == "") {
-            provisioningMode_HubCredentials();
-            return; // exit and restart
-        }
-        // Check for provisioning mode for Wi-Fi credentials
-        if (WiFiSSID == "" || WiFiPassword == "") {
-            provisioningMode_WiFiCredentials();
-        }
+    mqttServer = readNVS("MQTTServer");
+    mqttPort = readNVS("MQTTPort").toInt();
 
+    // Load TLS trust before connecting to MQTT broker
+    HubTrust::load();
+    if (!HubTrust::configured()) {
+        Serial.println("No valid MQTT root CA saved. Opening Hub setup to configure TLS trust.");
+    }
+
+    // Check for provisioning mode
+
+    // Test 1: If any of the required credentials are missing, enter provisioning mode.
+    if (
+        hubId == "" || hubToken == "" ||
+        WiFiSSID == "" || WiFiPassword == "" ||
+        mqttServer == "" || mqttPort == 0 || !HubTrust::configured()
+    ) {
+        HubProvisioning::start();
         return; // exit and restart
     }
+
+    // The MQTT worker validates the ping after Wi-Fi and TLS are ready.
+    Serial.println("All required credentials found. Starting Hub...");
 
     // Load paired Node macs from NVS
     if (!loadPairedNodes()) {
@@ -1003,6 +1273,18 @@ void setup() {
 
 
 void loop() {
+
+    // [Handle Hub Provisioning]
+    if (HubProvisioning::active) {
+        HubProvisioning::update();
+        return;
+    }
+
+    if (mqttPingStatus == MQTTPingStatus::Provisioning) {
+        Serial.println("MQTT broker connection failed after 3 attempts. Starting provisioning; saved credentials retained.");
+        HubProvisioning::start();
+        return;
+    }
 
     // To prevent the ESP32 from being overwhelmed by incoming ESP-NOW packets
     processPackets();

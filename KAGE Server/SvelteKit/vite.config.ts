@@ -4,9 +4,14 @@ import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
 
 export default defineConfig({
+	preview: {
+		port: 8060,
+		strictPort: true
+	},
 	plugins: [
 		tailwindcss(),
 		sveltekit({
+			paths: { origin: process.env.ORIGIN },
 			compilerOptions: {
 				// Force runes mode for the project, except for libraries. Can be removed in svelte 6.
 				runes: ({ filename }) =>

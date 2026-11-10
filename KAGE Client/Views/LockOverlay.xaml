@@ -2,6 +2,7 @@
                  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                  xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+                 xmlns:controls="clr-namespace:KAGE_Client.Controls"
                  Title="KAGELOCK / Security action"
                  WindowStyle="None" ResizeMode="NoResize" ShowInTaskbar="False"
                  Topmost="True" WindowStartupLocation="Manual"
@@ -12,6 +13,49 @@
             <ResourceDictionary.MergedDictionaries>
                 <ResourceDictionary Source="/KAGE_Client;component/Styles/KageTheme.xaml"/>
             </ResourceDictionary.MergedDictionaries>
+            <Style x:Key="OverlayActionButton" TargetType="ui:Button" BasedOn="{StaticResource ActionButton}">
+                <Setter Property="Background" Value="#211D22"/>
+                <Setter Property="BorderBrush" Value="#64505B"/>
+                <Setter Property="Foreground" Value="#F4F2F0"/>
+                <Setter Property="FontFamily" Value="{StaticResource RajdhaniFont}"/>
+                <Setter Property="FontSize" Value="16"/>
+                <Setter Property="FontWeight" Value="SemiBold"/>
+                <Setter Property="MinHeight" Value="48"/>
+                <Setter Property="Padding" Value="20,12"/>
+                <Setter Property="SnapsToDevicePixels" Value="True"/>
+                <Setter Property="UseLayoutRounding" Value="True"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="ui:Button">
+                            <Grid Background="Transparent">
+                                <Canvas IsHitTestVisible="False">
+                                    <controls:ChamferedButtonShape x:Name="Outline"
+                                        Width="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}"
+                                        Height="{Binding ActualHeight, RelativeSource={RelativeSource TemplatedParent}}"
+                                        Fill="{TemplateBinding Background}" Stroke="{TemplateBinding BorderBrush}" StrokeThickness="1"/>
+                                </Canvas>
+                                <ContentPresenter x:Name="Label" Margin="{TemplateBinding Padding}" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                  RecognizesAccessKey="True"/>
+                            </Grid>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Outline" Property="UIElement.Opacity" Value="0.85"/></Trigger>
+                                <Trigger Property="IsPressed" Value="True"><Setter TargetName="Outline" Property="UIElement.Opacity" Value="0.65"/></Trigger>
+                                <Trigger Property="IsKeyboardFocused" Value="True">
+                                    <Setter TargetName="Outline" Property="Shape.Stroke" Value="#FFFFFF"/>
+                                    <Setter TargetName="Outline" Property="Shape.StrokeThickness" Value="2"/>
+                                </Trigger>
+                                <Trigger Property="IsEnabled" Value="False">
+                                    <Setter TargetName="Outline" Property="Shape.Fill" Value="#242126"/>
+                                    <Setter TargetName="Outline" Property="Shape.Stroke" Value="#423C44"/>
+                                    <Setter TargetName="Label" Property="TextElement.Foreground" Value="#99909B"/>
+                                    <Setter Property="Foreground" Value="#99909B"/>
+                                    <Setter Property="Cursor" Value="Arrow"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
             <Style x:Key="DurationItem" TargetType="ComboBoxItem">
                 <Setter Property="Foreground" Value="#F4F2F0"/>
                 <Setter Property="Background" Value="#151517"/>
@@ -169,7 +213,7 @@
         <Border x:Name="WarningBand" VerticalAlignment="Center" Background="#F70C0D10"
                 BorderBrush="#75343A" BorderThickness="0,1">
             <Grid>
-                <!-- Quiet technical texture; the desktop remains visible outside the band. -->
+                <!-- Quiet technical texture. The desktop remains visible outside the band. -->
                 <Rectangle Fill="{StaticResource OverlayDotGrid}" IsHitTestVisible="False" Opacity="0.65"/>
                 <Rectangle Width="112" HorizontalAlignment="Left" Fill="{StaticResource OverlayHatch}" Opacity="0.13" IsHitTestVisible="False">
                     <Rectangle.OpacityMask>
@@ -328,24 +372,19 @@
                                     <RowDefinition Height="*"/>
                                 </Grid.RowDefinitions>
                                 <!-- <TextBlock Text="03 / RESPONSE" Style="{StaticResource OverlaySectionLabel}"/> -->
-                                <StackPanel Grid.Row="1" VerticalAlignment="Top" HorizontalAlignment="Left" MaxWidth="330" Margin="0,12,0,0">
-                                    <TextBlock Text="Request more time" FontSize="28" FontWeight="SemiBold" Margin="0,0,0,12"/>
-                                    <TextBlock Text="EXTENSION DURATION" Style="{StaticResource TechnicalLabel}" FontSize="11" Foreground="#91868D" Margin="0,0,0,9"/>
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="102"/>
-                                            <ColumnDefinition Width="24"/>
-                                            <ColumnDefinition Width="*"/>
-                                        </Grid.ColumnDefinitions>
-                                        <ComboBox x:Name="DurationBox" Style="{StaticResource DurationSelector}" Height="46"
-                                                  ItemsSource="{Binding ExtensionDurations}" SelectedItem="{Binding SelectedDuration}" IsEnabled="{Binding CanExtend}"
-                                                  AutomationProperties.Name="Extension duration in minutes"/>
-                                        <ui:Button Grid.Column="2" Content="EXTEND" Style="{StaticResource ActionButton}" IsEnabled="{Binding CanExtend}"
-                                                   Click="ExtendButton_Click" Height="46" Padding="12,10"/>
-                                    </Grid>
-                                    <ui:Button Content="CANCEL EXTENSION" Style="{StaticResource ActionButton}" Background="#181517" BorderBrush="#655059"
+                                <StackPanel Grid.Row="1" VerticalAlignment="Top" HorizontalAlignment="Stretch" MaxWidth="330" Margin="0,12,0,0">
+                                    <TextBlock Text="{Binding ResponseTitle}" FontSize="26" FontWeight="SemiBold" Margin="0,0,0,16" TextWrapping="Wrap"/>
+                                    <ui:Button x:Name="ConfirmActivityButton" Content="I'm here" Style="{StaticResource OverlayActionButton}"
+                                               Background="{StaticResource AccentBrush}" BorderBrush="{StaticResource AccentBrush}" Foreground="#102018"
+                                               Visibility="{Binding ConfirmActivityVisibility}" IsEnabled="{Binding CanConfirmActivity}"
+                                               Click="ConfirmActivityButton_Click" Margin="0,0,0,10"
+                                               AutomationProperties.Name="Confirm activity and dismiss inactivity countdown"/>
+                                    <ui:Button x:Name="ExtendButton" Content="{Binding ExtendButtonText}" Style="{StaticResource OverlayActionButton}"
+                                               IsEnabled="{Binding CanExtend}" Click="ExtendButton_Click"
+                                               AutomationProperties.Name="Request the configured countdown extension"/>
+                                    <ui:Button x:Name="CancelExtensionButton" Content="Cancel extension" Style="{StaticResource OverlayActionButton}"
                                                Visibility="{Binding CancelVisibility}" IsEnabled="{Binding CanCancel}" Click="CancelButton_Click"
-                                               HorizontalAlignment="Stretch" MinHeight="34" Padding="12,8" FontSize="10" Margin="0,10,0,0"
+                                               Margin="0,10,0,0"
                                                AutomationProperties.Name="Cancel extended countdown"/>
                                     <TextBlock Text="{Binding ControlHint}" Foreground="{StaticResource MutedBrush}" FontSize="14" TextWrapping="Wrap" Margin="0,12,0,0" LineHeight="18"/>
                                 </StackPanel>
@@ -387,7 +426,7 @@
                             </StackPanel>
                             <StackPanel Grid.Column="1" Orientation="Horizontal" Visibility="{Binding SafetyButtonVisibility}">
                                 <TextBlock Text="DEV /" Style="{StaticResource TechnicalLabel}" FontSize="9" Foreground="#9B896C" VerticalAlignment="Center" Margin="0,0,10,0"/>
-                                <ui:Button Content="SAFETY STOP" Style="{StaticResource ActionButton}" Background="#191619"
+                                <ui:Button Content="SAFETY STOP" Style="{StaticResource OverlayActionButton}" Background="#191619"
                                            BorderBrush="#796347" Foreground="{StaticResource WaitingBrush}" Click="SafetyButton_Click"
                                            MinHeight="30" Padding="12,7" FontSize="10" AutomationProperties.Name="Safety stop countdown"/>
                             </StackPanel>

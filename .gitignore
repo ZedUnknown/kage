@@ -1,0 +1,13 @@
+.*
+!.gitignore
+obj/
+bin/
+node_modules/
+*.key
+passwd
+.env
+.env.*
+secrets.*
+credentials.*
+*/Tests/
+*/tests/

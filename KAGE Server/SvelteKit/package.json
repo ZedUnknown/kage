@@ -4,14 +4,21 @@
 	"version": "0.0.1",
 	"type": "module",
 	"scripts": {
-		"dev": "vite dev",
+		"dev": "concurrently --kill-others --names web,mqtt -P \"vite dev {@}\" \"npm run worker:dev\" --",
 		"build": "vite build",
+		"start": "node --env-file=.env scripts/start.mjs",
 		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"lint": "prettier --check . && eslint .",
-		"format": "prettier --write ."
+		"format": "prettier --write .",
+		"db:migrate": "node scripts/migrate.ts",
+		"worker": "node scripts/mqtt-worker.ts",
+		"worker:dev": "node --watch scripts/mqtt-worker.ts",
+		"test": "node --test --test-concurrency=1 tests/*.test.ts",
+		"test:routes": "vite build && node --test tests/routes.test.ts",
+		"check:worker": "tsc --ignoreConfig --noEmit --allowImportingTsExtensions --module nodenext --target es2023 --strict --skipLibCheck scripts/mqtt-worker.ts scripts/migrate.ts"
 	},
 	"devDependencies": {
 		"@eslint/js": "^10.0.1",
@@ -21,6 +28,7 @@
 		"@tailwindcss/vite": "^4.3.0",
 		"@types/node": "^24",
 		"@types/pg": "^8.23.1",
+		"concurrently": "^10.0.7",
 		"eslint": "^10.4.1",
 		"eslint-config-prettier": "^10.1.8",
 		"eslint-plugin-svelte": "^3.19.0",
@@ -41,6 +49,8 @@
 	},
 	"dependencies": {
 		"mqtt": "^5.16.0",
-		"pg": "^8.23.1"
+		"pg": "^8.23.1",
+		"svelte-sonner": "^1.2.3",
+		"uplot": "^1.6.32"
 	}
 }

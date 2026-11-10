@@ -1,172 +1,148 @@
-﻿using System;
 using KAGE_Client.Models;
-using MQTTnet;
-using MQTTnet.Protocol;
 using System.Diagnostics;
 using System.IO;
-using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 
 namespace KAGE_Client.Services;
 
-/*
-
-Client subscribes to,
-
-: [/kage/client/{hub_id}/{pc_id}/state]
-{
-    "hub": {
-        "hub_id": "hub123",
-        "online": true,
-        "last_seen": "2024-06-30T11:59:00Z"
-    },
-    "pc": {
-        "pc_id": "pc456"
-    },
-    "assignment": {
-        "assigned": true,
-        "chair_id": "chair789"
-    },
-    "chair": {
-        "chair_id": "chair789",
-        "online": true,
-        "occupied": false,
-        "last_seen": "2024-06-30T11:58:00Z"
-    },
-    "sensor": {
-        "online": true,
-        "state": "active"
-    }
-}
-
-: [/kage/client/{hub_id}/{pc_id}/command]
-{
-    "command": "auto_lock",
-    "priority": 1,
-    "deadline_utc": "2024-06-30T12:00:00Z",
-    "server_time_utc": "2024-06-30T11:00:00Z",
-    "message": "Please lock the chair.",
-    "extension_active": true,
-    "allow_extension": true,
-    "allow_cancellation": false
-}
-*/
-
-public class MqttClient : IDisposable {
+public sealed class MqttClient : IDisposable {
     private readonly ClientConfig _config;
-    private readonly IMqttClient _client = new MqttClientFactory().CreateMqttClient();
+    private readonly MqttSession _session;
+    private readonly string _topic;
     private int _isListening;
-    private volatile bool _isReady;
-    private CancellationToken _lifetime;
+    private readonly SessionSecurity _security = new();
+    private readonly SemaphoreSlim _reportLock = new(1, 1);
+    public CommandJournal Journal { get; }
+    public bool IsConnected => _session.IsConnected;
 
-    public MqttClient(ClientConfig config) {
+    public MqttClient(ClientConfig config, CommandJournal? journal = null) {
+        if (!MqttAddress.IsTopicId(config.HubId) || !MqttAddress.IsTopicId(config.PcId))
+            throw new ArgumentException("A valid Hub ID and PC ID are required for MQTT.");
         _config = config;
+        Journal = journal ?? new CommandJournal(CommandJournal.PathFor(config));
+        _topic = $"kage/client/{config.HubId}/{config.PcId}";
+        _session = new MqttSession($"{_topic}/response");
     }
 
-    public async Task ListenAsync(
-        Action<ClientStateData> onStateReceived,
-        Action<ClientCommandData> onCommandReceived,
-        Action<bool> onConnectionChanged,
-        CancellationToken cancellationToken)
-    {
+    public async Task ListenAsync(Action<ClientStateData> onStateReceived,
+        Action<ClientCommandData> onCommandReceived, Action<bool> onConnectionChanged,
+        CancellationToken cancellationToken) {
         if (Interlocked.Exchange(ref _isListening, 1) != 0)
             throw new InvalidOperationException("MQTT is already listening.");
 
-        _lifetime = cancellationToken;
-        string topic = $"kage/client/{_config.HubId}/{_config.PcId}";
-        X509Certificate2Collection certificates = new();
         TaskCompletionSource disconnected = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        var messageGate = new object();
+        bool recovering = true;
+        var buffered = new List<ClientCommandData>();
 
-        Task OnDisconnected(MqttClientDisconnectedEventArgs args) {
-            _isReady = false;
-            disconnected.TrySetResult();
-            return Task.CompletedTask;
-        }
+        void OnDisconnected() => disconnected.TrySetResult();
 
-        Task OnMessageReceived(MqttApplicationMessageReceivedEventArgs args) {
-            if (cancellationToken.IsCancellationRequested) return Task.CompletedTask;
+        void OnMessage(string topic, string json) {
+            if (cancellationToken.IsCancellationRequested) return;
 
             try {
-                string json = args.ApplicationMessage.ConvertPayloadToString();
-                // [/kage/client/{hub_id}/{pc_id}/state]
-                if (args.ApplicationMessage.Topic == $"{topic}/state") {
-                    ClientStateData? state = JsonSerializer.Deserialize<ClientStateData>(json);
-                    if (state != null && state.Hub != null && state.Pc != null && state.Assignment != null)
-                        onStateReceived(state);
-                // [/kage/client/{hub_id}/{pc_id}/command]
-                } else if (args.ApplicationMessage.Topic == $"{topic}/command") {
-                    Trace.WriteLine($"MQTT command received: {json}");
-                    ClientCommandData? command = JsonSerializer.Deserialize<ClientCommandData>(json);
-                    if (command != null) onCommandReceived(command);
+                if (topic == $"{_topic}/state") {
+                    lock (messageGate) {
+                        if (!recovering) onStateReceived(ReadState(JsonSerializer.Deserialize<JsonElement>(json)));
+                    }
+                }
+                else if (topic == $"{_topic}/command") {
+                    if (ConnectionTest.TryCreateReply(json, _config.HubId, _config.PcId, DateTimeOffset.UtcNow, out string? testReply)) {
+                        _ = ReplyConnectionTestAsync(testReply!, cancellationToken);
+                        return;
+                    }
+
+                    var command = JsonSerializer.Deserialize<ClientCommandData>(json);
+                    if (command != null) {
+                        lock (messageGate) {
+                            // Recover the server snapshot before delivering live commands in version order.
+                            if (recovering) {
+                                if (buffered.Count < 100) buffered.Add(command);
+                            } else {
+                                onCommandReceived(command);
+                            }
+                        }
+                    }
                 }
             }
             catch (JsonException ex) {
                 Trace.WriteLine($"Invalid MQTT payload: {ex.Message}");
             }
-
-            return Task.CompletedTask;
         }
 
-        _client.DisconnectedAsync += OnDisconnected;
-        _client.ApplicationMessageReceivedAsync += OnMessageReceived;
-
+        _session.Disconnected += OnDisconnected;
+        _session.MessageReceived += OnMessage;
         try {
-            MqttClientOptionsBuilder options = new MqttClientOptionsBuilder()
-                .WithTcpServer(_config.Mqtt.Address, _config.Mqtt.Port)
-                .WithCredentials(_config.Mqtt.Username, _config.Mqtt.Password);
-
-            if (_config.Mqtt.UseTls) {
-                // Optional project-root ca.crt is embedded at build time. Otherwise use Windows trust.
-                using Stream? stream = typeof(MqttClient).Assembly.GetManifestResourceStream("KAGE_Client.Certificates.ca.crt");
-                if (stream != null) {
-                    using StreamReader reader = new(stream);
-                    certificates.ImportFromPem(await reader.ReadToEndAsync(cancellationToken).ConfigureAwait(false));
-                    if (certificates.Count == 0) throw new InvalidOperationException("ca.crt contains no certificates.");
-                }
-
-                options.WithTlsOptions(tls => {
-                    tls.UseTls();
-                    if (certificates.Count > 0) tls.WithTrustChain(certificates);
-                });
-            }
-
-            MqttClientOptions connectionOptions = options.Build();
-            MqttClientSubscribeOptions subscriptions = new MqttClientSubscribeOptionsBuilder()
-                .WithTopicFilter($"{topic}/state", MqttQualityOfServiceLevel.AtLeastOnce)
-                .WithTopicFilter($"{topic}/command", MqttQualityOfServiceLevel.AtLeastOnce)
-                .Build();
-
-            // One loop owns connection and resubscription, including initial connection failures.
             while (!cancellationToken.IsCancellationRequested) {
                 disconnected = new(TaskCreationOptions.RunContinuationsAsynchronously);
-                try {
-                    Trace.WriteLine($"Connecting MQTT: {_config.Mqtt.Address}:{_config.Mqtt.Port}");
-                    await _client.ConnectAsync(connectionOptions, cancellationToken).ConfigureAwait(false);
-                    MqttClientSubscribeResult result = await _client.SubscribeAsync(subscriptions, cancellationToken).ConfigureAwait(false);
-                    if (result.Items.Any(item => (int)item.ResultCode >= 128))
-                        throw new InvalidOperationException("The broker rejected an MQTT subscription.");
+                lock (messageGate) {
+                    recovering = true;
+                    buffered.Clear();
+                }
 
-                    _isReady = _client.IsConnected;
-                    if (_isReady) onConnectionChanged(true);
-                    await disconnected.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+                try {
+                    await _session.ConnectAsync(_config.Mqtt, [$"{_topic}/state", $"{_topic}/command"], cancellationToken, $"{_topic}/presence").ConfigureAwait(false);
+                    MqttResponse hello = await RequestAsync("hello", new {
+                        hub_id = _config.HubId,
+                        pc_id = _config.PcId,
+                        protocol_version = 1,
+                        capabilities = new[] { "command_lifecycle_v1", "presence_v1", "security_state_v1", "connection_test_v1", "activity_v1" },
+                        safety_button = CommandManager.safetyButton,
+                        session_id = _session.PresenceSession
+                    }, cancellationToken).ConfigureAwait(false);
+                    if (!hello.IsSuccess) throw new IOException("The server does not support command lifecycle v1.");
+
+                    // Send queued outcomes before requesting the authoritative recovery snapshot.
+                    await FlushReportsAsync(cancellationToken).ConfigureAwait(false);
+                    ClientStateData recovered = await RequestStateAsync(cancellationToken).ConfigureAwait(false);
+                    if (recovered.ProtocolVersion != 1 || !recovered.ServerTimeUtc.HasValue)
+                        throw new IOException("The server returned an unsupported recovery snapshot.");
+                    onStateReceived(recovered);
+                    lock (messageGate) {
+                        recovering = false;
+                        foreach (var command in buffered.OrderBy(c => c.Version)) onCommandReceived(command);
+                        buffered.Clear();
+                    }
+
+                    onConnectionChanged(true);
+                    while (!disconnected.Task.IsCompleted) {
+                        _session.ThrowIfSetupRequired();
+                        await PublishPresenceAsync(true, cancellationToken).ConfigureAwait(false);
+                        await FlushReportsAsync(cancellationToken).ConfigureAwait(false);
+                        await Task.WhenAny(disconnected.Task, Task.Delay(TimeSpan.FromSeconds(2), cancellationToken)).ConfigureAwait(false);
+                        cancellationToken.ThrowIfCancellationRequested();
+                    }
+                    _session.ThrowIfSetupRequired();
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
                     break;
                 }
+                catch (MqttSetupRequiredException) {
+                    // Invalid credentials need setup. Retrying the same connection will not help.
+                    throw;
+                }
                 catch (Exception ex) {
+                    _session.ThrowIfSetupRequired();
                     Trace.WriteLine($"MQTT ERROR: {ex.Message}");
                 }
                 finally {
-                    _isReady = false;
-                    if (!cancellationToken.IsCancellationRequested) onConnectionChanged(false);
-                    if (_client.IsConnected) {
-                        using CancellationTokenSource disconnect = new(TimeSpan.FromSeconds(5));
+                    if (_session.IsConnected) {
                         try {
-                            await _client.DisconnectAsync(new MqttClientDisconnectOptions(), disconnect.Token).ConfigureAwait(false);
+                            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+                            await PublishPresenceAsync(false, deadline.Token).ConfigureAwait(false);
                         }
                         catch (Exception ex) {
-                            Trace.WriteLine($"MQTT disconnect: {ex.Message}");
+                            Trace.WriteLine($"MQTT presence: {ex.Message}");
                         }
+                    }
+
+                    if (!cancellationToken.IsCancellationRequested) onConnectionChanged(false);
+
+                    try {
+                        await _session.DisconnectAsync().ConfigureAwait(false);
+                    }
+                    catch (Exception ex) {
+                        Trace.WriteLine($"MQTT disconnect: {ex.Message}");
                     }
                 }
 
@@ -174,32 +150,77 @@ public class MqttClient : IDisposable {
             }
         }
         finally {
-            _isReady = false;
-            _client.DisconnectedAsync -= OnDisconnected;
-            _client.ApplicationMessageReceivedAsync -= OnMessageReceived;
-            foreach (X509Certificate2 certificate in certificates) certificate.Dispose();
+            _session.Disconnected -= OnDisconnected;
+            _session.MessageReceived -= OnMessage;
             Interlocked.Exchange(ref _isListening, 0);
         }
     }
 
-    public async Task PublishAsync(string topic, string payload, CancellationToken cancellationToken = default) {
-        if (!_isReady || !_client.IsConnected)
-            throw new InvalidOperationException("MQTT is disconnected. The request was not sent.");
+    private async Task ReplyConnectionTestAsync(string payload, CancellationToken cancellationToken) {
+        try {
+            await _session.PublishAsync($"{_topic}/request", payload, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) {
+            Trace.WriteLine($"MQTT connection test reply: {ex.Message}");
+        }
+    }
 
-        using CancellationTokenSource request = CancellationTokenSource.CreateLinkedTokenSource(_lifetime, cancellationToken);
-        MqttApplicationMessage message = new MqttApplicationMessageBuilder()
-            .WithTopic(topic)
-            .WithPayload(payload)
-            .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce)
-            .WithRetainFlag(false)
-            .Build();
+    public async Task<ClientStateData> RequestStateAsync(CancellationToken cancellationToken = default) {
+        MqttResponse response = await RequestAsync("state", new { hub_id = _config.HubId, pc_id = _config.PcId }, cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccess) throw new InvalidOperationException(response.detail?.message ?? "The MQTT state request was rejected.");
+        return ReadState(response.data);
+    }
 
-        MqttClientPublishResult result = await _client.PublishAsync(message, request.Token).ConfigureAwait(false);
-        if ((int)result.ReasonCode >= 128)
-            throw new InvalidOperationException("The broker rejected the MQTT publish.");
+    private ClientStateData ReadState(JsonElement data) {
+        if (data.ValueKind != JsonValueKind.Object || !data.TryGetProperty("hub", out _)
+            || !data.TryGetProperty("pc", out _) || !data.TryGetProperty("assignment", out _))
+            throw new JsonException("Missing client state.");
+        ClientStateData? state = data.Deserialize<ClientStateData>();
+        if (state?.Hub?.HubId != _config.HubId || state.Pc?.PcId != _config.PcId || state.Assignment == null)
+            throw new JsonException("The state does not belong to this Hub and PC.");
+        return state;
+    }
+
+    public Task<MqttResponse> RequestAsync(string action, object data, CancellationToken cancellationToken = default) =>
+        _session.RequestAsync($"{_topic}/request", action, data, cancellationToken);
+
+    public Task PublishAsync(string topic, string payload, CancellationToken cancellationToken = default) =>
+        _session.PublishAsync(topic, payload, cancellationToken);
+
+    private Task PublishPresenceAsync(bool online, CancellationToken cancellationToken) {
+        InputActivitySample? activity = online ? InputActivity.Read() : null;
+        return PublishAsync($"{_topic}/presence", JsonSerializer.Serialize(new {
+            session_id = _session.PresenceSession, online, security_state = _security.Read(),
+            safety_button = CommandManager.safetyButton, protocol_version = 1,
+            idle_ms = activity?.IdleMilliseconds, input_tick = activity?.InputTick
+        }), cancellationToken);
+    }
+
+    public async Task FlushReportsAsync(CancellationToken cancellationToken = default) {
+        // Heartbeats and command updates can both flush reports. Keep one publisher at a time.
+        await _reportLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try {
+            foreach (var report in Journal.Pending()) {
+                var response = await RequestAsync("command_report", new {
+                    hub_id = _config.HubId,
+                    pc_id = _config.PcId,
+                    command_id = report.Command.CommandId,
+                    version = report.Command.Version,
+                    status = report.Status,
+                    message = report.Message
+                }, cancellationToken).ConfigureAwait(false);
+                if (!response.IsSuccess) throw new IOException("The server rejected a command report.");
+                Journal.Acknowledge(report);
+            }
+        }
+        finally {
+            _reportLock.Release();
+        }
     }
 
     public void Dispose() {
-        _client.Dispose();
+        _security.Dispose();
+        _session.Dispose();
+        Journal.Dispose();
     }
 }

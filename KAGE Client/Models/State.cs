@@ -2,13 +2,23 @@ using System.Text.Json.Serialization;
 
 namespace KAGE_Client.Models;
 
-/*
-[JsonPropertyName("hub")]
-public HubState Hub { get; set; } = new();
-
-When the JSON contains a property called "hub", put its value into the C# property "Hub".
-*/
+// JsonPropertyName maps a JSON field such as "hub" to its C# property, Hub.
 public class ClientStateData {
+    [JsonPropertyName("policies")]
+    public ClientPolicyState? Policies { get; set; }
+
+    [JsonPropertyName("protocol_version")]
+    public int ProtocolVersion { get; set; }
+
+    [JsonPropertyName("command_version")]
+    public long CommandVersion { get; set; }
+
+    [JsonPropertyName("active_command")]
+    public ClientCommandData? ActiveCommand { get; set; }
+
+    [JsonPropertyName("server_time_utc")]
+    public DateTimeOffset? ServerTimeUtc { get; set; }
+
     [JsonPropertyName("hub")]
     public HubState Hub { get; set; } = new();
 
@@ -23,6 +33,41 @@ public class ClientStateData {
 
     [JsonPropertyName("sensor")]
     public SensorState? Sensor { get; set; }
+}
+
+public class ClientPolicyState {
+    [JsonPropertyName("enforcement_version")]
+    public int EnforcementVersion { get; set; }
+
+    [JsonPropertyName("enabled")]
+    public bool Enabled { get; set; }
+
+    [JsonPropertyName("action")]
+    public string Action { get; set; } = "auto_lock";
+
+    [JsonPropertyName("delay_seconds")]
+    public int DelaySeconds { get; set; }
+
+    [JsonPropertyName("allow_extension")]
+    public bool AllowExtension { get; set; }
+
+    [JsonPropertyName("extension_duration_seconds")]
+    public int ExtensionDurationSeconds { get; set; }
+
+    [JsonPropertyName("maximum_extensions")]
+    public int MaximumExtensions { get; set; }
+
+    [JsonPropertyName("inactivity_monitoring_enabled")]
+    public bool InactivityMonitoringEnabled { get; set; }
+
+    [JsonPropertyName("inactivity_timeout_seconds")]
+    public int InactivityTimeoutSeconds { get; set; }
+
+    [JsonPropertyName("confirmation_timeout_seconds")]
+    public int ConfirmationTimeoutSeconds { get; set; }
+
+    [JsonPropertyName("activity_supported")]
+    public bool ActivitySupported { get; set; }
 }
 
 

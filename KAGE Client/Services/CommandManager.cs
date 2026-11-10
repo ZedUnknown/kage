@@ -11,9 +11,10 @@ public partial class CommandManager {
 
     private ClientCommandData? _ongoingCommand;
     private ClientCommandData? _lastCommand = null;
-    private readonly Api? _api;
     private readonly ClientConfig? _config;
     private readonly MqttClient? _mqttClient;
+    private readonly CommandJournal _journal;
+    private readonly Action<ClientCommandData> _execute;
 
     public event EventHandler<string>? ExecutionFailed;
 
@@ -26,6 +27,7 @@ public partial class CommandManager {
         if (!safetyButton || _disposed) return;
 
         // Stop the countdown and notify MainWindow to close the overlay.
+        if (_ongoingCommand != null) Report(_ongoingCommand, "cancelled", "Development safety button pressed.");
         ClearCountdownState();
         CancelOngoingCommand(new ClientCommandData {
             Command = _lastCommand?.Command ?? "cancel_auto_lock",
@@ -34,13 +36,15 @@ public partial class CommandManager {
     }
 
     public CommandManager(
-        Api? api = null,
         ClientConfig? config = null,
-        MqttClient? mqttClient = null
+        MqttClient? mqttClient = null,
+        CommandJournal? journal = null,
+        Action<ClientCommandData>? execute = null
     ) {
-        _api = api;
         _config = config;
         _mqttClient = mqttClient;
+        _journal = journal ?? mqttClient?.Journal ?? new CommandJournal(null);
+        _execute = execute ?? ExecuteCommand;
 
         // any state change will trigger the _lastCommand to be updated to the current _ongoingCommand
         StateChanged += (_, _) => {
@@ -58,10 +62,22 @@ public partial class CommandManager {
         _dispatcher.VerifyAccess();
         if (_disposed) return;
         if (command == null || string.IsNullOrWhiteSpace(command.Command)) return;
+        if (!CommandJournal.IsValid(command, DateTimeOffset.UtcNow)) return;
+        try {
+            if (!_journal.Receive(command, _ongoingCommand?.CommandId == command.CommandId)) {
+                FlushReports();
+                return;
+            }
+        }
+        catch (Exception ex) {
+            ExecutionFailed?.Invoke(this, $"Cannot persist command replay protection: {ex.Message}");
+            return;
+        }
+        FlushReports();
 
         TimeSpan countdown = TimeSpan.Zero;
         if (command.DeadlineUtc.HasValue && command.ServerTimeUtc.HasValue) {
-            TimeSpan timeDifference = command.DeadlineUtc.Value - command.ServerTimeUtc.Value;
+            TimeSpan timeDifference = command.DeadlineUtc.Value - DateTimeOffset.UtcNow;
             countdown = timeDifference > TimeSpan.Zero ? timeDifference : TimeSpan.Zero;
         }
 
@@ -88,12 +104,55 @@ public partial class CommandManager {
             case "cancel_force_logout":
 
                 Trace.WriteLine($"Received command: {commandName} - Cancelling any ongoing command.");
-                CancelOngoingCommand(command);
+                if (_ongoingCommand == null) {
+                    Report(command, "executed", "No active command to cancel.");
+                } else if (command.TargetCommandId != _ongoingCommand.CommandId || command.TargetDeadlineUtc != _ongoingCommand.DeadlineUtc) {
+                    Report(command, "rejected", "Cancellation does not match the active operation.");
+                } else {
+                    ClientCommandData target = _ongoingCommand;
+                    CancelOngoingCommand(command);
+
+                    if (_ongoingCommand == null) {
+                        Report(target, "cancelled", "Cancelled by the server.");
+                        Report(command, "executed");
+                    } else {
+                        Report(command, "rejected", "Cancellation priority does not permit this operation.");
+                    }
+                }
                 break;
 
             default:
                 Trace.WriteLine($"Unknown command: {commandName}");
                 break;
+        }
+    }
+
+    public void Recover(ClientStateData state) {
+        _dispatcher.VerifyAccess();
+        if (_disposed || state.ProtocolVersion != 1 || state.CommandVersion < _journal.Version) return;
+        if (state.ActiveCommand != null && state.ActiveCommand.Version == state.CommandVersion
+            && CommandJournal.IsValid(state.ActiveCommand, DateTimeOffset.UtcNow)) {
+            HandleCommand(state.ActiveCommand);
+        } else {
+            if (_ongoingCommand != null) Report(_ongoingCommand, "cancelled", "Authoritative recovery cleared the operation.");
+            ClearCountdownState();
+            _journal.Advance(state.CommandVersion);
+        }
+    }
+
+    private void Report(ClientCommandData command, string status, string message = "") {
+        _journal.Report(command, status, message);
+        FlushReports();
+    }
+
+    private async void FlushReports() {
+        if (_mqttClient == null || !_mqttClient.IsConnected) return;
+
+        try {
+            await _mqttClient.FlushReportsAsync();
+        }
+        catch (Exception ex) {
+            Trace.WriteLine($"Command report queued for retry: {ex.Message}");
         }
     }
 
@@ -119,6 +178,7 @@ public partial class CommandManager {
                 inComingCommandPriority < ongoingCommandPriority // lower priority than ongoing command
             ) {
                 Trace.WriteLine($"Ignoring incoming command {inComingCommandName} due to lower or equal priority than ongoing command {ongoingCommandName}");
+                Report(command, "rejected", "Lower or equal command priority.");
                 return;
             }
             else if (inComingCommandName == ongoingCommandName) { // extended dealine situations
@@ -137,6 +197,7 @@ public partial class CommandManager {
         bool isOngoingCommandChanged = ongoingCommandRef != _ongoingCommand;
 
         if (isOngoingCommandChanged) {
+            if (ongoingCommandRef != null) Report(ongoingCommandRef, "cancelled", "Superseded by a newer command.");
             InvalidateRequest();
             InteractionMessage = "";
             _commandDuration = countdown;
@@ -271,7 +332,7 @@ public partial class CommandManager {
         }
 
         Trace.WriteLine(
-            $"Ignoring cancel command {cancelCommandName}; ongoing command is {ongoingCommandName}"
+            $"Ignoring cancel command {cancelCommandName}. Ongoing command is {ongoingCommandName}"
         );
     }
 
@@ -300,17 +361,33 @@ public partial class CommandManager {
     private void CompleteCommand() {
         if (_ongoingCommand == null) return;
 
-        // Copy _ongoingCommand
+        // Keep the command reference before clearing the countdown and closing the overlay.
         ClientCommandData? command = _ongoingCommand;
 
         // Clear the countdown states
         ClearCountdownState();
 
         try {
-            // ExecuteCommand(command);
+            if (command.ExpiresAtUtc <= DateTimeOffset.UtcNow) {
+                Report(command, "failed", "Command expired before Windows execution.");
+                return;
+            }
+
+            // Durably claim execution before the Windows API. A crash cannot replay it.
+            Report(command, "executing");
+            _execute(command);
+            Report(command, "executed", "Windows accepted the operation. Security state is reported separately.");
         }
-        catch (Win32Exception ex) {
+        catch (Exception ex) {
             Trace.WriteLine($"Command execution failed: {ex.Message}");
+
+            try {
+                Report(command, "failed", ex.Message);
+            }
+            catch (Exception journalError) {
+                Trace.WriteLine($"Cannot persist execution failure: {journalError.Message}");
+            }
+
             ExecutionFailed?.Invoke(this, $"Windows could not execute {command.Command}: {ex.Message}");
         }
     }

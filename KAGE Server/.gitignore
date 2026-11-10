@@ -1,0 +1,6 @@
+SvelteKit/build/
+SvelteKit/*-verification.log
+!SvelteKit/.prettierignore
+*/build
+*/docs
+*/tests

@@ -3,7 +3,9 @@
 declare global {
 	namespace App {
 		// interface Error {}
-		// interface Locals {}
+		interface Locals {
+			account: import('./lib/server/auth.ts').Account | null;
+		}
 		// interface PageData {}
 		// interface PageState {}
 		// interface Platform {}

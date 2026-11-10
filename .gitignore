@@ -9,3 +9,5 @@ passwd
 .env.*
 secrets.*
 credentials.*
+*/Tests/
+*/tests/

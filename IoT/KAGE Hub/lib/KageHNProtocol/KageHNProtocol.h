@@ -44,12 +44,13 @@ enum PacketTypes: uint8_t {
 
     UNPAIR_REQUEST = 6,
     UNPAIR_RESPONSE = 7,
+    UNPAIR_RESPONSE_ACK = 8,
 
-    TEST_PACKET_REQUEST = 8,
-    TEST_PACKET_RESPONSE = 9,
-    PAIRING_SAVED = 10,
+    TEST_PACKET_REQUEST = 9,
+    TEST_PACKET_RESPONSE = 10,
+    PAIRING_SAVED = 11,
 
-    DATA_PACKET = 12,
+    DATA_PACKET = 15,
 };
 
 // [Broadcast MAC address for ESP-NOW communication]

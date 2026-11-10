@@ -86,7 +86,7 @@ namespace HubProvisioning {
 
         server.on("/root-ca", HTTP_GET, []() {
             server.sendHeader("Cache-Control", "no-store");
-            server.sendHeader("X-CA-Source", HubTrust::customRootCA.isEmpty() ? "default" : "custom");
+            server.sendHeader("X-CA-Source", HubTrust::configured() ? "custom" : "none");
             server.send(200, "text/plain", HubTrust::current());
         });
 
@@ -108,16 +108,21 @@ namespace HubProvisioning {
         server.on("/root-ca/reset", HTTP_POST, []() {
             if (rejectDuringRestart()) return;
             if (!HubTrust::reset()) {
-                server.send(500, "text/plain", "Could not reset the root CA in device storage. Please try again.");
+                server.send(500, "text/plain", "Could not clear the root CA in device storage. Please try again.");
                 return;
             }
-            server.send(200, "text/plain", "Root CA reset to the built-in certificate.");
+            server.send(200, "text/plain", "Saved root CA cleared. Save a root CA before restarting the hub.");
         });
 
         // [Receive and Save Configuration]
         server.on("/save", HTTP_POST, []() {
 
             if (rejectDuringRestart()) return;
+
+            if (!HubTrust::configured()) {
+                server.send(400, "text/plain", "Save a valid root CA under TLS trust before restarting the hub.");
+                return;
+            }
 
             String wifiSSID = server.arg("WiFiSSID");
             String wifiPassword = server.arg("WiFiPassword");

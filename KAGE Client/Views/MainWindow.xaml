@@ -8,6 +8,7 @@
                  FontFamily="/KAGE_Client;component/Assets/Fonts/#Rajdhani"
                  Foreground="#F4F2F0" Background="#101012"
                  WindowStartupLocation="CenterScreen"
+                 WindowState="Maximized"
                  ExtendsContentIntoTitleBar="True" WindowBackdropType="Mica">
     <ui:FluentWindow.Resources>
         <ResourceDictionary>
@@ -305,6 +306,56 @@
                                     </StackPanel>
                                 </Border>
                             </Grid>
+                            <StackPanel Margin="0,16,0,18">
+                                    <Grid Margin="0,2,0,14">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                        <StackPanel Margin="0,0,18,0">
+                                            <TextBlock Text="Active policies" FontSize="23" FontWeight="SemiBold"/>
+                                            <TextBlock Text="{Binding PolicySummary.Message}" FontSize="13" Foreground="{StaticResource MutedBrush}"
+                                                       Margin="0,4,0,0" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/>
+                                        </StackPanel>
+                                        <Border Grid.Column="1" Background="#21191D" BorderBrush="#49333B" BorderThickness="1"
+                                                Padding="10,7" VerticalAlignment="Top" Margin="0,3,0,0">
+                                            <TextBlock Text="{Binding PolicySummary.CountLabel}" Style="{StaticResource TechnicalLabel}"/>
+                                        </Border>
+                                    </Grid>
+                                    <Border Padding="18,0">
+                                        <Border.Style>
+                                            <Style TargetType="Border" BasedOn="{StaticResource Panel}">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding PolicySummary.Policies.Count}" Value="0">
+                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Border.Style>
+                                    <ItemsControl ItemsSource="{Binding PolicySummary.Policies}" AutomationProperties.Name="Policies for this workstation">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1" Padding="0,14">
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                        <StackPanel Margin="0,0,18,0">
+                                                            <TextBlock Text="{Binding Name}" FontSize="15" FontWeight="SemiBold"/>
+                                                            <TextBlock Text="{Binding Description}" FontSize="13" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,4,0,0"/>
+                                                        </StackPanel>
+                                                        <TextBlock Grid.Column="1" Text="{Binding Status}" FontSize="12" VerticalAlignment="Top" Margin="0,2,0,0">
+                                                            <TextBlock.Style>
+                                                                <Style TargetType="TextBlock">
+                                                                    <Setter Property="Foreground" Value="{StaticResource WaitingBrush}"/>
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding IsReady}" Value="True"><Setter Property="Foreground" Value="{StaticResource AccentBrush}"/></DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </TextBlock.Style>
+                                                        </TextBlock>
+                                                    </Grid>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                    </Border>
+                            </StackPanel>
                             <Border Background="#0D0D0F" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" Padding="14,12">
                                 <Grid>
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>

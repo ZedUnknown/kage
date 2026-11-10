@@ -16,17 +16,25 @@ public partial class CommandManager : IDisposable {
 
     public event EventHandler? StateChanged;
 
-    public ClientCommandData? ActiveCommand => _ongoingCommand; // `ActiveCommand` takes the current command every time `ActiveCommand` is accessed.
+    public ClientCommandData? ActiveCommand => _ongoingCommand;
 
     public bool IsForced => _ongoingCommand?.Command.Trim().StartsWith("force_", StringComparison.OrdinalIgnoreCase) == true;
     public bool IsLogout => _ongoingCommand?.Command.Trim().EndsWith("logout", StringComparison.OrdinalIgnoreCase) == true;
     public bool IsExtensionActive => _ongoingCommand?.ExtensionActive == true;
     public bool IsRequestPending => _requestCancellation != null;
     public bool CanExtend => _ongoingCommand != null && !IsForced && _ongoingCommand.AllowExtension == true && !IsRequestPending;
-    public bool CanCancelExtension => IsExtensionActive && !IsForced && _ongoingCommand?.AllowCancellation != false;
+    public bool IsActivityPrompt => !IsForced && _ongoingCommand?.Reason == "activity";
+    public bool CanConfirmActivity => IsActivityPrompt && !IsRequestPending;
+    public bool CanCancelExtension => IsExtensionActive && !IsForced && !IsActivityPrompt && _ongoingCommand?.AllowCancellation != false;
+    public int ExtensionDurationSeconds => _ongoingCommand?.ExtensionDurationSeconds ?? 300;
     public string InteractionMessage { get; private set; } = "";
-    public int SecondsRemaining => (int)Math.Min(int.MaxValue, Math.Ceiling(Math.Max(0,
-        (_commandDuration - (_commandStopwatch?.Elapsed ?? TimeSpan.Zero)).TotalSeconds)));
+    public int SecondsRemaining {
+        get {
+            TimeSpan remaining = _commandDuration - (_commandStopwatch?.Elapsed ?? TimeSpan.Zero);
+            double seconds = Math.Ceiling(Math.Max(0, remaining.TotalSeconds));
+            return (int)Math.Min(int.MaxValue, seconds);
+        }
+    }
 
     public void UpdateClientState(ClientStateData? state) {
         _dispatcher.VerifyAccess();
@@ -39,26 +47,37 @@ public partial class CommandManager : IDisposable {
 
     private void InvalidateRequest() {
         CancellationTokenSource? request = _requestCancellation;
+        // Clear ownership first: a cancelled continuation must not update the next command.
         _requestCancellation = null;
         request?.Cancel();
     }
 
-    public Task RequestExtensionAsync(int minutes) => RequestChangeAsync(minutes, false);
+    public Task RequestExtensionAsync() => RequestChangeAsync(ExtensionDurationSeconds, false);
     public Task CancelExtensionAsync() => RequestChangeAsync(0, true);
+    public Task ConfirmActivityAsync() => RequestChangeAsync(0, true, true);
 
-    private async Task RequestChangeAsync(int minutes, bool cancel) {
+    private async Task RequestChangeAsync(int seconds, bool cancel, bool confirmActivity = false) {
         _dispatcher.VerifyAccess();
         if (_disposed || IsRequestPending || _ongoingCommand == null) return;
         if (IsForced) {
             SetInteractionMessage("This administrative action cannot be extended or cancelled here.");
             return;
         }
-        if (cancel ? !CanCancelExtension : !CanExtend) {
+        bool canRequestChange;
+        if (confirmActivity) {
+            canRequestChange = CanConfirmActivity;
+        } else if (cancel) {
+            canRequestChange = CanCancelExtension;
+        } else {
+            canRequestChange = CanExtend;
+        }
+
+        if (!canRequestChange) {
             SetInteractionMessage(cancel ? "There is no cancellable extension." : "Extensions are not allowed for this action.");
             return;
         }
-        if (!cancel && minutes != 1 && minutes != 2 && minutes != 5 && minutes != 10) {
-            SetInteractionMessage("Choose an extension of 1, 2, 5 or 10 minutes.");
+        if (!cancel && (seconds < 10 || seconds > 3600)) {
+            SetInteractionMessage("The configured extension duration is invalid.");
             return;
         }
         if (_config == null || _mqttClient == null) {
@@ -69,24 +88,17 @@ public partial class CommandManager : IDisposable {
         ClientCommandData requestedCommand = _ongoingCommand;
         using CancellationTokenSource request = new(TimeSpan.FromSeconds(10));
         _requestCancellation = request;
-        SetInteractionMessage(cancel ? "Checking assigned chair presence…" : "Requesting extension…");
+        if (confirmActivity) {
+            SetInteractionMessage("Confirming activity…");
+        } else if (cancel) {
+            SetInteractionMessage("Checking assigned chair presence…");
+        } else {
+            SetInteractionMessage("Requesting extension…");
+        }
 
         try {
-            // Publishing only requests an extension. The updated MQTT command owns the deadline.
-            if (!cancel) {
-                if (!IsCurrentRequest(requestedCommand, request)) return;
-                await _mqttClient!.PublishAsync($"kage/client/{_config.HubId}/{_config.PcId}/extension/request",
-                    JsonSerializer.Serialize(new {
-                        command = requestedCommand.Command,
-                        requested_seconds = minutes * 60
-                    }), request.Token);
-                if (IsCurrentRequest(requestedCommand, request))
-                    SetInteractionMessage("Extension requested. Waiting for server approval; the countdown is still active.");
-                return;
-            }
-
-            // Request fresh presence through MQTT; a retained state may predate a disconnect.
-            if (cancel) {
+            // Request fresh presence through MQTT because a retained state may predate a disconnect.
+            if (cancel && !confirmActivity) {
                 long stateVersion = _stateVersion;
                 ClientStateData freshState = await _mqttClient.RequestStateAsync(request.Token);
                 if (!IsCurrentRequest(requestedCommand, request)) return;
@@ -99,14 +111,23 @@ public partial class CommandManager : IDisposable {
             }
 
             // These requests never change the local timer. Only an approved command does.
-            MqttResponse result = await _mqttClient.RequestAsync(
-                "cancel_extension", new {
-                    hub_id = _config.HubId,
-                    pc_id = _config.PcId,
-                    command = requestedCommand.Command,
-                    deadline_utc = requestedCommand.DeadlineUtc,
-                    duration_seconds = cancel ? 0 : minutes * 60
-                }, request.Token);
+            string action;
+            if (confirmActivity) {
+                action = "confirm_activity";
+            } else {
+                action = cancel ? "cancel_extension" : "extend";
+            }
+
+            MqttResponse result = await _mqttClient.RequestAsync(action, new {
+                hub_id = _config.HubId,
+                pc_id = _config.PcId,
+                command = requestedCommand.Command,
+                command_id = requestedCommand.CommandId,
+                version = requestedCommand.Version,
+                deadline_utc = requestedCommand.DeadlineUtc,
+                requested_seconds = seconds
+            }, request.Token);
+
             if (!IsCurrentRequest(requestedCommand, request)) return;
             if (!result.IsSuccess) {
                 SetInteractionMessage(result?.detail?.message ?? "The server rejected the request. The countdown is still active.");
@@ -121,8 +142,8 @@ public partial class CommandManager : IDisposable {
                 SetInteractionMessage("The server did not return an approved command. The countdown is still active.");
                 return;
             }
-            if (cancel && !HasPresence(_clientState)) {
-                SetInteractionMessage("Chair presence changed. Cancellation rejected; the countdown is still active.");
+            if (cancel && !confirmActivity && !HasPresence(_clientState)) {
+                SetInteractionMessage("Chair presence changed. Cancellation rejected. The countdown is still active.");
                 return;
             }
 

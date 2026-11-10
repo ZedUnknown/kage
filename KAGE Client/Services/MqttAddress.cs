@@ -3,6 +3,18 @@ using KAGE_Client.Models;
 namespace KAGE_Client.Services;
 
 public static class MqttAddress {
+    public static bool TryCreate(string address, string port, bool useTls, out MqttConfig config) {
+        config = new();
+        string host = address.Trim();
+        if (host.StartsWith('[') && host.EndsWith(']')) host = host[1..^1];
+        if (!int.TryParse(port.Trim(), System.Globalization.NumberStyles.None,
+            System.Globalization.CultureInfo.InvariantCulture, out int portNumber)) return false;
+        config.Address = host;
+        config.Port = portNumber;
+        config.UseTls = useTls;
+        return IsValid(config);
+    }
+
     public static bool TryParse(string address, out MqttConfig config) {
         config = new();
         if (!Uri.TryCreate(address.Trim(), UriKind.Absolute, out Uri? uri)

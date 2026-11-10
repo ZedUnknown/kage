@@ -9,6 +9,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- WPF owns startup. declare DPI awareness in the manifest before HWND creation.
+         The WinForms ApplicationConfiguration startup advice does not apply here. -->
+    <NoWarn>$(NoWarn);WFAC010</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
@@ -19,6 +23,8 @@
 
   <ItemGroup>
     <Compile Remove=".verification\**" />
+    <Compile Remove="Tests\**" />
+    <Page Remove="Tests\**" />
     <Page Remove=".verification\**" />
   </ItemGroup>
 
@@ -38,17 +44,12 @@
     <None Remove="Assets\Fonts\Rajdhani-Regular.ttf" />
     <None Remove="Assets\Fonts\Rajdhani-SemiBold.ttf" />
     <None Remove="Assets\Icons\kage.ico" />
-    <None Remove="Certificates\ca.crt" />
   </ItemGroup>
 
   <ItemGroup>
     <Content Include="Assets\Icons\kage.ico">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
-  </ItemGroup>
-
-  <ItemGroup>
-    <EmbeddedResource Include="Certificates\ca.crt" />
   </ItemGroup>
 
   <ItemGroup>

@@ -22,11 +22,11 @@ public partial class MainWindow : FluentWindow, INotifyPropertyChanged {
 
     private readonly ClientConfig _config;
     private readonly CommandManager commandManager;
-    private LockOverlay? _lockOverlay;
+    private LockOverlayController? _lockOverlay;
     private readonly CancellationTokenSource _lifetime = new();
     private readonly Forms.NotifyIcon _trayIcon;
     private readonly Forms.ContextMenuStrip _trayMenu;
-    private WindowState _restoreWindowState = WindowState.Normal;
+    private WindowState _restoreWindowState = WindowState.Maximized;
 
     public string ServerAddress => MqttAddress.Format(_config.Mqtt);
 
@@ -65,11 +65,13 @@ public partial class MainWindow : FluentWindow, INotifyPropertyChanged {
     public string LastEventTime { get; private set; } = DateTime.Now.ToString("HH:mm:ss");
 
     // State variables
-    public bool CanRefresh => !_isChecking && !_isClosed && _mqttClient?.IsConnected == true;
+    public bool CanRefresh => !_isChecking && !_isClosed && !_returningToSetup && _mqttClient?.IsConnected == true;
 
 
     // MQTT Client
     private ClientStateData? _state;
+    private bool _policiesConnected;
+    public ClientPolicySummary PolicySummary { get; private set; } = ClientPolicySummary.Create(null, false);
     private readonly MqttClient _mqttClient;
     private Task? _mqttTask;
 
@@ -166,9 +168,9 @@ public partial class MainWindow : FluentWindow, INotifyPropertyChanged {
         _isClosed = true;
         commandManager.StateChanged -= CommandManager_StateChanged;
         commandManager.ExecutionFailed -= CommandManager_ExecutionFailed;
-        commandManager.Dispose();
-        _lockOverlay?.CloseForCommand();
+        _lockOverlay?.Dispose();
         _lockOverlay = null;
+        commandManager.Dispose();
         _trayIcon.Visible = false;
         _trayIcon.MouseDoubleClick -= TrayIcon_MouseDoubleClick;
         _trayIcon.Dispose();
@@ -188,14 +190,18 @@ public partial class MainWindow : FluentWindow, INotifyPropertyChanged {
     // [Initial Full Load and Refresh]
     private bool _isChecking;
     private bool _isClosed;
+    private bool _returningToSetup;
+    // A disconnect or live update makes any earlier refresh response stale.
     private long _stateRevision;
 
     private async Task LoadStateAsync() {
         if (_isChecking || _isClosed) return;
         _isChecking = true;
         long revision = _stateRevision;
+
         SetServerStatus("Checking…", "Requesting current state through MQTT", _waitingBrush);
         UpdateBindings();
+
         try {
             ClientStateData state = await _mqttClient.RequestStateAsync(_lifetime.Token);
             // A live state update or disconnect supersedes this in-flight refresh.
@@ -217,10 +223,12 @@ public partial class MainWindow : FluentWindow, INotifyPropertyChanged {
     }
 
     private void ApplyState(ClientStateData state) {
-        if (_isClosed)
+        if (_isClosed || _returningToSetup)
             return;
 
         _state = state;
+        _policiesConnected = true;
+        commandManager.Recover(state);
         _stateRevision++;
         SetServerStatus("Connected", "Receiving KAGE state through MQTT", _accentBrush);
 
@@ -323,20 +331,23 @@ public partial class MainWindow : FluentWindow, INotifyPropertyChanged {
 
     private async Task RunMqttAsync(CancellationToken cancellationToken) {
         try {
+            // MQTT callbacks run in the background. Window and command state stay on the UI thread.
             await _mqttClient.ListenAsync(
                 onStateReceived: state => {
-                    Dispatcher.BeginInvoke(new Action(() => ApplyState(state)));
+                    Dispatcher.BeginInvoke(new Action(() => {
+                        if (!_returningToSetup) ApplyState(state);
+                    }));
                 },
                 onCommandReceived: command => {
                     Dispatcher.BeginInvoke(new Action(() => {
-                        if (!_isClosed) commandManager.HandleCommand(command);
+                        if (!_isClosed && !_returningToSetup) commandManager.HandleCommand(command);
                     }));
                 },
                 onConnectionChanged: connected => {
                     Dispatcher.BeginInvoke(new Action(() => {
-                        if (_isClosed) return;
+                        if (_isClosed || _returningToSetup) return;
                         if (connected) {
-                            SetServerStatus("Connected", "MQTT connected; waiting for current state", _accentBrush);
+                            SetServerStatus("Connected", "MQTT connected. Waiting for current state", _accentBrush);
                             _ = LoadStateAsync();
                         } else {
                             ShowError("Disconnected", "MQTT disconnected. Retrying…");
@@ -351,6 +362,9 @@ public partial class MainWindow : FluentWindow, INotifyPropertyChanged {
         catch (OperationCanceledException) {
             Trace.WriteLine("MQTT stopped");
         }
+        catch (MqttSetupRequiredException ex) {
+            _ = Dispatcher.BeginInvoke(new Action(() => ReturnToSetup(ex.Message)));
+        }
         catch (Exception ex) {
             Trace.WriteLine($"MQTT ERROR: {ex.Message}");
             _ = Dispatcher.BeginInvoke(new Action(() => {
@@ -361,18 +375,39 @@ public partial class MainWindow : FluentWindow, INotifyPropertyChanged {
         }
     }
 
+    private async void ReturnToSetup(string message) {
+        if (_isClosed || _returningToSetup) return;
+        _returningToSetup = true;
+        _lifetime.Cancel();
+        commandManager.Dispose();
+        _lockOverlay?.Dispose();
+        _lockOverlay = null;
+        _config.RequiresSetup = true;
+        try { await ConfigService.SaveAsync(_config); }
+        catch (Exception ex) {
+            Trace.WriteLine($"Could not save setup state: {ex.GetType().Name}");
+        }
+        if (_isClosed) return;
+        SetupWindow setup = new(_config.Mqtt, message);
+        Application.Current.MainWindow = setup;
+        setup.Show();
+        setup.Activate();
+        Closing -= MainWindow_Closing;
+        Close();
+    }
+
     // [Command Overlay]
     private void CommandManager_StateChanged(object? sender, EventArgs e) {
         // opens the overlay when a command exists
-        if (_isClosed) return;
+        if (_isClosed || _returningToSetup) return;
         if (commandManager.ActiveCommand == null) {
             if (_lockOverlay != null) Trace.WriteLine("Closing command overlay: no active command.");
-            _lockOverlay?.CloseForCommand();
+            _lockOverlay?.Dispose();
             _lockOverlay = null;
         } else if (_lockOverlay == null) {
-            _lockOverlay = new LockOverlay(commandManager);
+            _lockOverlay = new LockOverlayController(commandManager);
             _lockOverlay.Show();
-            Trace.WriteLine($"Command overlay shown: {commandManager.ActiveCommand.Command}; visible={_lockOverlay.IsVisible}; topmost={_lockOverlay.Topmost}; bounds={_lockOverlay.Left},{_lockOverlay.Top},{_lockOverlay.ActualWidth},{_lockOverlay.ActualHeight}");
+            Trace.WriteLine($"Command overlays shown on all displays: {commandManager.ActiveCommand.Command}");
         }
     }
 
@@ -398,6 +433,8 @@ public partial class MainWindow : FluentWindow, INotifyPropertyChanged {
     }
 
     private void UpdateBindings() {
+        PolicySummary = ClientPolicySummary.Create(_state, _policiesConnected);
+        OnPropertyChanged(nameof(PolicySummary));
         OnPropertyChanged(nameof(HubId));
         OnPropertyChanged(nameof(PcId));
         OnPropertyChanged(nameof(ChairId));
@@ -423,6 +460,7 @@ public partial class MainWindow : FluentWindow, INotifyPropertyChanged {
     }
 
     private void ShowError(string status, string message) {
+        _policiesConnected = false;
         _stateRevision++;
         commandManager.UpdateClientState(null);
         SetServerStatus(status, message, _waitingBrush);

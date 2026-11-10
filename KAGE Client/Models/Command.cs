@@ -5,6 +5,30 @@ namespace KAGE_Client.Models;
 
 public class ClientCommandData
 {
+    [JsonPropertyName("reason")]
+    public string? Reason { get; set; }
+
+    [JsonPropertyName("extension_duration_seconds")]
+    public int ExtensionDurationSeconds { get; set; } = 300;
+
+    [JsonPropertyName("command_id")]
+    public string CommandId { get; set; } = "";
+
+    [JsonPropertyName("version")]
+    public long Version { get; set; }
+
+    [JsonPropertyName("protocol_version")]
+    public int ProtocolVersion { get; set; }
+
+    [JsonPropertyName("expires_at_utc")]
+    public DateTimeOffset? ExpiresAtUtc { get; set; }
+
+    [JsonPropertyName("target_command_id")]
+    public string? TargetCommandId { get; set; }
+
+    [JsonPropertyName("target_deadline_utc")]
+    public DateTimeOffset? TargetDeadlineUtc { get; set; }
+
     [JsonPropertyName("command")]
     public string Command { get; set; } = "";
 

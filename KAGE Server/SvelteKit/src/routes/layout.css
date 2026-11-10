@@ -1,1 +1,379 @@
 @import 'tailwindcss';
+
+/* Design tokens and document defaults. */
+:root {
+	--sidebar-duration: 260ms;
+	--sidebar-easing: cubic-bezier(0.2, 0, 0, 1);
+	--font-body: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+	--font-tech: ui-monospace, 'Cascadia Code', Consolas, monospace;
+	--background: #101014;
+	--surface-deep: #14141a;
+	--surface: #18181f;
+	--surface-raised: #202029;
+	--surface-selected: #2c1b24;
+	--field: #14141a;
+	--line: #2d2d39;
+	--line-strong: #474754;
+	--text: #f5f5f8;
+	--text-secondary: #c9c9d4;
+	--muted: #a3a3b3;
+	--accent: #f4475a;
+	--accent-hover: #ff6878;
+	--action: #cf2940;
+	--action-hover: #df3048;
+	--accent-soft: #ff8c9a;
+	--accent-border: #a52334;
+	--accent-dim: #f4475a12;
+	--accent-halo: #f4475a24;
+	--success: #79dfa2;
+	--success-surface: #14251d;
+	--success-border: #305742;
+	--warning: #edc878;
+	--warning-border: #655334;
+	--warning-surface: #231f18;
+	font-family: var(--font-body);
+	font-size: 14px;
+	line-height: 1.5;
+	color: var(--text);
+	background: var(--background);
+	font-synthesis: none;
+	color-scheme: dark;
+}
+* {
+	box-sizing: border-box;
+	scrollbar-width: thin;
+	scrollbar-color: var(--line-strong) transparent;
+}
+html {
+	scrollbar-gutter: stable;
+}
+body {
+	margin: 0;
+}
+::selection {
+	background: var(--accent-border);
+	color: #fff;
+}
+/* Shared form fields, buttons, links, and interaction states. */
+.form-field {
+	display: grid;
+	gap: 7px;
+	min-width: 0;
+}
+button {
+	min-width: 0;
+}
+button,
+a {
+	touch-action: manipulation;
+}
+a {
+	color: inherit;
+	text-decoration: none;
+}
+button,
+.button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
+	min-height: 38px;
+	padding: 9px 15px;
+	border: 1px solid transparent;
+	border-radius: 8px;
+	background: var(--action);
+	color: #fff;
+	font-size: 13px;
+	font-weight: 600;
+	line-height: 1.4;
+	cursor: pointer;
+	transition:
+		background-color 180ms ease,
+		border-color 180ms ease,
+		color 180ms ease,
+		box-shadow 180ms ease;
+}
+button:where(:hover):where(:not(:disabled)),
+.button:hover {
+	background: var(--action-hover);
+}
+button:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+button > span[aria-hidden],
+.button > span[aria-hidden] {
+	display: inline-flex;
+	flex-shrink: 0;
+}
+button.secondary,
+.button.secondary {
+	background: var(--surface-raised);
+	border-color: var(--line);
+	color: var(--text-secondary);
+}
+button.secondary:hover:not(:disabled),
+.button.secondary:hover {
+	background: #292934;
+	border-color: var(--line-strong);
+	color: var(--text);
+}
+button.danger {
+	color: var(--accent-soft);
+}
+button.link-button,
+.button.link-button {
+	min-height: 36px;
+	padding: 8px 0;
+	border: 0;
+	background: none;
+	color: var(--text-secondary);
+	font-weight: 500;
+	justify-content: flex-start;
+}
+button.link-button:hover:not(:disabled),
+.button.link-button:hover {
+	background: none;
+	color: var(--accent-soft);
+}
+button.icon-button {
+	width: 36px;
+	min-width: 36px;
+	height: 36px;
+	min-height: 36px;
+	padding: 8px;
+	background: transparent;
+	border-color: transparent;
+	color: var(--muted);
+}
+button.icon-button:hover:not(:disabled) {
+	background: var(--surface-raised);
+	color: var(--text);
+}
+input,
+select,
+textarea {
+	font: inherit;
+	width: 100%;
+	min-width: 0;
+	padding: 10px 12px;
+	border: 1px solid var(--line-strong);
+	border-radius: 8px;
+	background: var(--field);
+	color: var(--text);
+	line-height: 1.5;
+	transition:
+		border-color 180ms ease,
+		box-shadow 180ms ease;
+}
+input::placeholder,
+textarea::placeholder {
+	color: var(--muted);
+	opacity: 1;
+}
+input:hover,
+select:hover,
+textarea:hover {
+	border-color: #636371;
+}
+input:focus,
+select:focus,
+textarea:focus {
+	border-color: var(--accent);
+	box-shadow: 0 0 0 3px var(--accent-dim);
+	outline: none;
+}
+button:focus-visible,
+a:focus-visible,
+summary:focus-visible {
+	outline: 2px solid var(--accent-soft);
+	outline-offset: 3px;
+}
+label {
+	display: grid;
+	gap: 7px;
+	font-size: 13px;
+	font-weight: 500;
+	color: var(--text-secondary);
+}
+/* Application typography and base disclosure styles. */
+small,
+.muted {
+	color: var(--muted);
+	font-size: 12px;
+	line-height: 1.6;
+}
+h1,
+h2,
+h3,
+p {
+	margin-top: 0;
+}
+h1 {
+	margin-bottom: 0;
+	font-size: 28px;
+	font-weight: 650;
+	letter-spacing: -0.7px;
+	line-height: 1.25;
+}
+h2 {
+	margin-bottom: 14px;
+	font-size: 18px;
+	font-weight: 600;
+	letter-spacing: -0.25px;
+}
+h3 {
+	font-size: 15px;
+	font-weight: 600;
+}
+p {
+	color: var(--text-secondary);
+	line-height: 1.7;
+	font-size: 14px;
+}
+code {
+	font-family: var(--font-tech);
+	overflow-wrap: anywhere;
+	font-size: 12px;
+}
+form {
+	display: grid;
+	gap: 18px;
+}
+details {
+	margin-top: 20px;
+	border-top: 1px solid var(--line);
+	padding-top: 16px;
+}
+summary {
+	cursor: pointer;
+	color: var(--text-secondary);
+	font-size: 13px;
+	font-weight: 500;
+	margin-bottom: 12px;
+}
+summary:hover {
+	color: var(--text);
+}
+/* Shared utilities. Keep these unscoped so snippets and nested components can reuse them. */
+.sr-only {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
+}
+.status-dot {
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: currentColor;
+}
+.eyebrow {
+	color: var(--muted);
+	font-size: 11px;
+	font-weight: 600;
+	letter-spacing: 0.7px;
+}
+.empty-state p {
+	margin-bottom: 16px;
+}
+.panel {
+	margin: 20px 0;
+	padding: 24px;
+	border: 1px solid var(--line);
+	border-radius: 12px;
+	background: var(--surface);
+}
+.badge {
+	display: inline-block;
+	padding: 4px 9px;
+	border: 1px solid var(--line);
+	border-radius: 999px;
+	background: var(--surface-raised);
+	color: var(--text-secondary);
+	font-size: 11px;
+	line-height: 1.4;
+	white-space: nowrap;
+}
+.form-grid {
+	grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+	align-items: end;
+}
+.actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 10px;
+	margin: 16px 0 0;
+}
+/* Sonner renders its own controls outside component scopes. */
+[data-sonner-toast] :is([data-close-button], [data-button]) {
+	min-height: 0;
+}
+.empty {
+	padding: 36px 24px;
+	border: 1px dashed var(--line-strong);
+	border-radius: 12px;
+	text-align: center;
+	color: var(--muted);
+}
+.table-wrap {
+	overflow: auto;
+	margin-top: 24px;
+	border: 1px solid var(--line);
+	border-radius: 12px;
+}
+table {
+	border-collapse: collapse;
+	width: 100%;
+	font-size: 13px;
+	white-space: nowrap;
+}
+th {
+	padding: 14px 16px;
+	background: var(--surface-raised);
+	color: var(--muted);
+	text-align: left;
+	font-size: 12px;
+	font-weight: 500;
+}
+td {
+	padding: 15px 16px;
+	border-top: 1px solid var(--line);
+	color: var(--text-secondary);
+}
+tbody tr:hover {
+	background: var(--surface);
+}
+td .actions {
+	margin: 0;
+}
+.mobile-only {
+	display: none !important;
+}
+@media (max-width: 800px) {
+	.mobile-only {
+		display: inline-flex !important;
+	}
+	.desktop-only {
+		display: none !important;
+	}
+	h1 {
+		font-size: 25px;
+	}
+	.panel {
+		padding: 20px;
+	}
+	.form-grid {
+		grid-template-columns: 1fr;
+	}
+}
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		transition: none !important;
+		scroll-behavior: auto !important;
+	}
+}

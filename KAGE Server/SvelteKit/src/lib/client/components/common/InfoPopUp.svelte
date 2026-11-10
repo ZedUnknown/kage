@@ -11,7 +11,7 @@ let {
     toggle = $bindable(),
     anchorElement,
 
-    commonMode = false, // if true, shows only common info like created at, updated at, last seen etc.
+    commonMode = false, // Show only creation, update and last-seen details.
     opt_allUsersDetails = [] // only needed in commonMode
 } = $props();
 
@@ -22,7 +22,9 @@ let {
 
     let style = $derived(() => {
         if (!anchorElement || !toggle) return 'display:none;';
+
         const rect = anchorElement.getBoundingClientRect();
+
         return `position:fixed; top:${rect.top - 9}px; left:${rect.right + 8}px; z-index:9999;`;
     });
 
@@ -79,9 +81,7 @@ let {
             <hr class="border-gray-300 my-2.5">
         {/if}
 
-        <!-- Content -->
         <div class=" flex flex-col w-full px-2.5 items-center">
-            <!-- 1st row category (phone_number) | 3rd row .... (created at, updated at, last seen) -->
             <div class=" flex flex-col w-full gap-2">
                 {#if !commonMode}
                     <div class="flex flex-col w-full gap-1">

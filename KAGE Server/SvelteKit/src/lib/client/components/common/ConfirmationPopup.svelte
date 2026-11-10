@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { Toaster } from 'svelte-sonner';
-	import Trash from '../icons/Trash.svelte';
+
 	let {
 		title,
 		message,
@@ -15,23 +15,29 @@
 		onSubmit: (toasterId: string) => Promise<boolean | void>;
 		onCloseTrigger: () => void;
 	} = $props();
+
 	let dialog: HTMLDialogElement;
 	let cancelButton: HTMLButtonElement;
 	let busy = $state(false);
 	const id = $props.id();
+
 	onMount(() => {
 		const overflow = document.body.style.overflow;
 		document.body.style.overflow = 'hidden';
 		dialog.showModal();
 		cancelButton.focus();
+
 		return () => {
 			dialog.close();
 			document.body.style.overflow = overflow;
 		};
 	});
+
 	async function confirm() {
 		if (busy) return;
+
 		busy = true;
+
 		try {
 			if ((await onSubmit(id)) !== false) dialog.close();
 		} finally {
@@ -58,12 +64,14 @@
 			type="button"
 			class="secondary"
 			disabled={busy}
-			onclick={() => dialog.close()}>Cancel</button
+			onclick={() => dialog.close()}
 		>
+			Cancel
+		</button>
 		<button type="button" disabled={busy} onclick={confirm}>
 			<span aria-hidden="true">Yes</span>{busy
-				? 'Working…'
-				: submitMessage}
+				? 'Working...'
+				: '"' + submitMessage + '"'}
 		</button>
 	</div>
 	<Toaster {id} theme="dark" richColors closeButton />

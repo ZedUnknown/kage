@@ -11,13 +11,6 @@
 	let containerElement: HTMLElement;
 	let instance: PanZoom | undefined;
 
-	// export let className = '';
-	// export let options: Partial<PanZoomOptions> = {};
-	// export const reset = () => {
-	// 	instance?.moveTo(0, 0);
-	// 	instance?.zoomAbs(0, 0, 1);
-	// };
-
 	let {
 		className = '',
 		options = {},
@@ -28,6 +21,7 @@
 	onMount(() => {
 		const localInstance = panzoom(containerElement, { ...defaultOpts, ...options });
 		instance = localInstance;
+
 		return () => {
 			localInstance.dispose();
 		};

@@ -4,18 +4,6 @@
 
 {#if !hide}
 	<div class="flex justify-center text-center">
-		<style>
-			.spinner {
-				transform-origin: center;
-				animation: spinner_AtaB 0.75s infinite linear;
-			}
-			@keyframes spinner_AtaB {
-				100% {
-					transform: rotate(360deg);
-				}
-			}
-		</style>
-
 		<svg
 			aria-hidden="true"
 			class={properties}
@@ -34,3 +22,15 @@
 		</svg>
 	</div>
 {/if}
+
+<style>
+	.spinner {
+		transform-origin: center;
+		animation: spinner_AtaB 0.75s infinite linear;
+	}
+	@keyframes spinner_AtaB {
+		100% {
+			transform: rotate(360deg);
+		}
+	}
+</style>

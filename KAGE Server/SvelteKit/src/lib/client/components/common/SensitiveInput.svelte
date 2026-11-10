@@ -2,6 +2,7 @@
 	import type { HTMLInputAttributes } from 'svelte/elements';
 	import Eye from '../icons/Eye.svelte';
 	import EyeSlash from '../icons/EyeSlash.svelte';
+
 	const uniqueId = $props.id();
 	let {
 		id = uniqueId,
@@ -23,6 +24,7 @@
 		showButtonClassName?: string;
 		label?: string;
 	} = $props();
+
 	let show = $state(false);
 </script>
 

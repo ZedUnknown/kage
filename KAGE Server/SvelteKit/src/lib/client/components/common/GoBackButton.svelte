@@ -1,5 +1,6 @@
 <script lang="ts">
 	import CaretLeft from '../icons/CaretLeft.svelte';
+
 	let {
 		title = 'Go back',
 		description = '',
@@ -34,21 +35,22 @@
 		aria-label={title}
 		onclick={() => (onClick ? onClick() : history.back())}
 	>
-		<span class={__class__arrow_container} aria-hidden="true"
-			><CaretLeft properties={__class__arrow} /></span
-		>
+		<span class={__class__arrow_container} aria-hidden="true"><CaretLeft properties={__class__arrow} /></span>
 		{#if !separate}
-			<span class={__class__content}
-				><span class={__class__title}>{title}</span>{#if description}<small
-						class={__class__description}>{description}</small
-					>{/if}</span
+			<span class={__class__content}><span class={__class__title}>{title}</span>{#if description}<small
+						class={__class__description}
 			>
+					{description}
+			</small>{/if}
+			</span>
 		{/if}
 	</button>
 	{#if separate}<div class={__class__content}>
 			<span class={__class__title}>{title}</span>{#if description}<small
-					class={__class__description}>{description}</small
-				>{/if}
+					class={__class__description}
+			>
+				{description}
+			</small>{/if}
 		</div>{/if}
 </div>
 

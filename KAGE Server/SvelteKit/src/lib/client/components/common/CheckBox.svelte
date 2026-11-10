@@ -27,7 +27,8 @@
     <div class="
         check-mark flex items-center justify-center w-[16px] h-[16px] rounded-sm transition-colors duration-200
         {_checked ? 'bg-primary-500 border-primary-500' : ''} border border-gray-400
-    ">
+    "
+    >
         <Check properties="size-3 text-white transition-opacity duration-200 {_checked ? 'opacity-100' : 'opacity-0'}" />
     </div>
 </label>

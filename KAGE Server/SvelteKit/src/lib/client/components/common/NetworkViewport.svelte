@@ -3,15 +3,10 @@
 	import MinusCircle from '../icons/MinusCircle.svelte';
 	import PlusCircle from '../icons/PlusCircle.svelte';
 	import CornersOut from '../icons/CornersOut.svelte';
-	import {
-		fitNetwork,
-		zoomNetwork,
-		minNetworkScale,
-		maxNetworkScale,
-		type NetworkView
-	} from '../../network-viewport.ts';
+	import { fitNetwork, zoomNetwork, minNetworkScale, maxNetworkScale, type NetworkView } from '../../network-viewport.ts';
 
 	let { children }: { children: Snippet } = $props();
+
 	let viewport: HTMLDivElement;
 	let content: HTMLDivElement;
 	let view = $state<NetworkView>({ x: 0, y: 0, scale: 1 });
@@ -24,6 +19,7 @@
 
 	function fit() {
 		if (!viewport || !content) return;
+
 		view = fitNetwork(
 			viewport.clientWidth,
 			viewport.clientHeight,
@@ -32,12 +28,15 @@
 		);
 		adjusted = false;
 	}
+
 	function zoom(scale: number, x = viewport.clientWidth / 2, y = viewport.clientHeight / 2) {
 		view = zoomNetwork(view, scale, x, y);
 		adjusted = true;
 	}
+
 	function resetZoom() {
 		if (!viewport || !content) return;
+
 		view = {
 			x: (viewport.clientWidth - content.offsetWidth) / 2,
 			y: (viewport.clientHeight - content.offsetHeight) / 2,
@@ -45,29 +44,37 @@
 		};
 		adjusted = true;
 	}
+
 	function wheel(event: WheelEvent) {
 		event.preventDefault();
 		if (!event.deltaY) return;
+
 		const bounds = viewport.getBoundingClientRect();
 		const delta =
 			event.deltaY *
 			(event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? viewport.clientHeight : 1);
+
 		zoom(
 			view.scale * Math.exp(-Math.max(-100, Math.min(100, delta)) * 0.003),
 			event.clientX - bounds.left,
 			event.clientY - bounds.top
 		);
 	}
+
 	function gesture() {
 		const [a, b] = [...pointers.values()];
+
 		return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, distance: Math.hypot(b.x - a.x, b.y - a.y) };
 	}
+
 	function pointerDown(event: PointerEvent) {
 		if (event.button !== 0 || pointers.size >= 2) return;
+
 		if (!pointers.size) {
 			suppressClick = false;
 			origin = { x: event.clientX, y: event.clientY };
 		}
+
 		pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
 		if (pointers.size === 2) {
 			pinch = gesture();
@@ -75,9 +82,12 @@
 			for (const id of pointers.keys()) viewport.setPointerCapture(id);
 		}
 	}
+
 	function pointerMove(event: PointerEvent) {
 		const previous = pointers.get(event.pointerId);
+
 		if (!previous) return;
+
 		pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
 		if (pointers.size === 2 && pinch) {
 			const next = gesture();
@@ -89,9 +99,12 @@
 			);
 			view = { ...view, x: view.x + next.x - pinch.x, y: view.y + next.y - pinch.y };
 			pinch = next;
+
 			return;
 		}
+
 		if (!dragging && Math.hypot(event.clientX - origin.x, event.clientY - origin.y) < 5) return;
+
 		const start = dragging ? previous : origin;
 		dragging = true;
 		suppressClick = true;
@@ -99,24 +112,32 @@
 		viewport.setPointerCapture(event.pointerId);
 		view = { ...view, x: view.x + event.clientX - start.x, y: view.y + event.clientY - start.y };
 	}
+
 	function pointerEnd(event: PointerEvent) {
 		if (!pointers.has(event.pointerId)) return;
+
 		pointers.delete(event.pointerId);
-		if (viewport.hasPointerCapture(event.pointerId))
+		if (viewport.hasPointerCapture(event.pointerId)) {
 			viewport.releasePointerCapture(event.pointerId);
+		}
+
 		pinch = undefined;
 		dragging = false;
 		const remaining = pointers.values().next().value;
+
 		if (remaining) origin = remaining;
 	}
+
 	function keyDown(event: KeyboardEvent) {
 		if (event.target !== viewport) return;
+
 		const panKeys: Record<string, [number, number]> = {
 			ArrowLeft: [40, 0],
 			ArrowRight: [-40, 0],
 			ArrowUp: [0, 40],
 			ArrowDown: [0, -40]
 		};
+
 		if (panKeys[event.key]) {
 			event.preventDefault();
 			const [x, y] = panKeys[event.key];
@@ -126,9 +147,12 @@
 			event.preventDefault();
 			if (event.key === 'Home') fit();
 			else if (event.key === '0') resetZoom();
-			else zoom(view.scale * (event.key === '-' ? 1 / 1.2 : 1.2));
+			else {
+				zoom(view.scale * (event.key === '-' ? 1 / 1.2 : 1.2));
+			}
 		}
 	}
+
 	onMount(() => {
 		viewport.addEventListener('wheel', wheel, { passive: false });
 		const observer = new ResizeObserver(() => {
@@ -137,6 +161,7 @@
 		observer.observe(viewport);
 		observer.observe(content);
 		fit();
+
 		return () => {
 			observer.disconnect();
 			viewport.removeEventListener('wheel', wheel);
@@ -154,7 +179,7 @@
 	}}
 />
 <div class="network-viewport" data-no-pull-refresh>
-	<!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions (This focusable map supports keyboard panning and zooming; device controls remain native buttons.) -->
+	<!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions (The map needs focus for keyboard panning and zooming. Device controls use native buttons.) -->
 	<div
 		bind:this={viewport}
 		class="viewport"
@@ -193,37 +218,44 @@
 				aria-label="Zoom out"
 				title="Zoom out (−)"
 				disabled={view.scale <= minNetworkScale}
-				onclick={() => zoom(view.scale / 1.2)}><MinusCircle properties="size-4" /></button
+				onclick={() => zoom(view.scale / 1.2)}
 			>
+				<MinusCircle properties="size-4" />
+			</button>
 			<button
 				type="button"
 				class="zoom-level"
 				aria-label="Reset zoom to 100%"
 				title="Reset zoom (0)"
-				onclick={resetZoom}>{Math.round(view.scale * 100)}%</button
+				onclick={resetZoom}
 			>
+				{Math.round(view.scale * 100)}%
+			</button>
 			<button
 				type="button"
 				class="icon-button"
 				aria-label="Zoom in"
 				title="Zoom in (+)"
 				disabled={view.scale >= maxNetworkScale}
-				onclick={() => zoom(view.scale * 1.2)}><PlusCircle properties="size-4" /></button
+				onclick={() => zoom(view.scale * 1.2)}
 			>
+				<PlusCircle properties="size-4" />
+			</button>
 			<span class="control-divider" aria-hidden="true"></span>
 			<button
 				type="button"
 				class="icon-button"
 				aria-label="Fit network to view"
 				title="Fit to view (Home)"
-				onclick={fit}><CornersOut properties="size-4" /></button
+				onclick={fit}
 			>
+				<CornersOut properties="size-4" />
+			</button>
 		</div>
 	</div>
-	<span id="network-navigation-help" class="sr-only"
-		>Drag to pan, scroll or pinch to zoom. Use arrow keys to pan, plus and minus to zoom, 0 to reset
-		zoom, and Home to fit the network.</span
-	>
+	<span id="network-navigation-help" class="sr-only">Drag to pan, scroll or pinch to zoom. Use arrow keys to pan, plus and minus to zoom, 0 to reset
+		zoom, and Home to fit the network.
+	</span>
 </div>
 
 <style>
@@ -310,14 +342,6 @@
 		width: 1px;
 		margin-inline: 3px;
 		background: var(--line);
-	}
-	.sr-only {
-		position: absolute;
-		width: 1px;
-		height: 1px;
-		overflow: hidden;
-		clip-path: inset(50%);
-		white-space: nowrap;
 	}
 	@media (max-width: 600px) {
 		.navigation-hint {

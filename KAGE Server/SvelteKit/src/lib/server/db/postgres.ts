@@ -1,31 +1,36 @@
 import pg from 'pg';
+import '../config.ts';
 
-import {
-    DATABASE_HOST,
-    DATABASE_PORT,
-    DATABASE_NAME,
-    DATABASE_USER,
-    DATABASE_PASSWORD
-} from '$app/env/private';
-
-const { Pool } = pg;
-
-export const pool = new Pool({
-    host: DATABASE_HOST,
-    port: Number(DATABASE_PORT),
-    database: DATABASE_NAME,
-    user: DATABASE_USER,
-    password: DATABASE_PASSWORD
+export const pool = new pg.Pool({
+	host: process.env.DATABASE_HOST,
+	port: Number(process.env.DATABASE_PORT || 5432),
+	database: process.env.DATABASE_NAME,
+	user: process.env.DATABASE_USER,
+	password: process.env.DATABASE_PASSWORD,
+	max: 12,
+	connectionTimeoutMillis: 5000,
+	options: '-c search_path=public -c statement_timeout=10000'
 });
 
-pool.on('connect', () => {
-    console.log('[DB] PostgreSQL client connected');
-});
+pool.on('error', () => console.error('[DB] Connection failure'));
 
-pool.on('error', (error) => {
-    console.error('[DB] PostgreSQL pool error:', error);
-});
+export async function transaction<T>(work: (db: pg.PoolClient) => Promise<T>): Promise<T> {
+	const db = await pool.connect();
+
+	try {
+		await db.query('BEGIN');
+		const result = await work(db);
+		await db.query('COMMIT');
+
+		return result;
+	} catch (error) {
+		await db.query('ROLLBACK');
+		throw error;
+	} finally {
+		db.release();
+	}
+}
 
 export async function getDatabase() {
-    return pool;
+	return pool;
 }

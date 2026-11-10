@@ -59,6 +59,7 @@
 					values: (plot, splits) =>
 						splits.map((second) => {
 							const age = Math.round((plot.scales.x.max ?? second) - second);
+
 							return age === 0 ? 'Now' : age + 's';
 						})
 				},
@@ -87,27 +88,37 @@
 
 		async function refresh() {
 			if (stopped || inFlight || document.hidden) return;
+
 			inFlight = true;
 			controller = new AbortController();
+
 			try {
 				const response = await fetch('/api/admin/event-activity', {
 					cache: 'no-store',
 					signal: AbortSignal.any([controller.signal, AbortSignal.timeout(5000)])
 				});
+
 				if (response.status === 401) {
 					window.location.assign('/auth');
+
 					return;
 				}
+
 				if (!response.ok) throw new Error('Event activity unavailable');
+
 				const activity: EventActivity = await response.json();
+
 				if (stopped) return;
+
 				const data: uPlot.AlignedData = [activity.seconds, activity.counts];
+
 				if (chart) chart.setData(data);
 				else {
 					options.width = Math.max(1, Math.floor(host.clientWidth));
 					options.height = Math.max(1, Math.floor(host.clientHeight));
 					chart = new uPlot(options, data, host);
 				}
+
 				snapshot = activity;
 				connection = 'live';
 			} catch {
@@ -117,22 +128,27 @@
 				}
 			} finally {
 				inFlight = false;
-				if (!stopped && !document.hidden)
+				if (!stopped && !document.hidden) {
 					timer = setTimeout(refresh, connection === 'reconnecting' ? 3000 : 1000);
+				}
 			}
 		}
 
 		const observer = new ResizeObserver(() => {
 			const width = Math.floor(host.clientWidth);
 			const height = Math.floor(host.clientHeight);
-			if (width > 0 && height > 0 && chart && (width !== chart.width || height !== chart.height))
+
+			if (width > 0 && height > 0 && chart && (width !== chart.width || height !== chart.height)) {
 				chart.setSize({ width, height });
+			}
 		});
 		observer.observe(host);
+
 		const visibilityChanged = () => {
 			clearTimeout(timer);
 			if (!document.hidden) void refresh();
 		};
+
 		document.addEventListener('visibilitychange', visibilityChanged);
 		void refresh();
 
@@ -176,8 +192,8 @@
 		{#if !snapshot}
 			<p class="placeholder">
 				{connection === 'connecting'
-					? 'Loading event activity…'
-					: 'Event activity unavailable. Retrying…'}
+					? 'Loading event activity...'
+					: 'Event activity unavailable. Retrying...'}
 			</p>
 		{/if}
 	</div>
@@ -187,7 +203,7 @@
 			per second.{/if}
 	</p>
 	{#if snapshot && connection === 'reconnecting'}
-		<p class="paused">Updates interrupted. Displaying the last received window.</p>
+		<p class="paused">Updates interrupted. Showing the last received data.</p>
 	{/if}
 </section>
 
@@ -279,8 +295,6 @@
 		border-color: var(--muted);
 	}
 	.stale .plot {
-		position: absolute;
-		inset: 0;
 		opacity: 0.5;
 	}
 	.placeholder {

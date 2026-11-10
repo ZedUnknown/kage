@@ -26,7 +26,6 @@
     let formSelect: HTMLSelectElement;
     let panel: HTMLDivElement;
 
-    // UI state
     let open = $state(false);
     let query = $state("");
     let activeIndex = $state(-1);
@@ -42,9 +41,7 @@
             (item) =>
                 !searchable ||
                 !query.trim() ||
-                (item.label + " " + (item.searchText ?? ""))
-                    .toLowerCase()
-                    .includes(query.trim().toLowerCase())
+                (item.label + " " + (item.searchText ?? "")).toLowerCase().includes(query.trim().toLowerCase())
         )
     );
     const activeOption = $derived(options[activeIndex]);
@@ -80,10 +77,7 @@
         value = item.value;
         invalid = false;
         close();
-        onchange?.(
-            value,
-            items.find((entry) => entry.value === value)
-        );
+        onchange?.(value, items.find((entry) => entry.value === value));
         control.focus();
     }
 
@@ -91,10 +85,11 @@
         const start = activeIndex < 0 ? (direction === 1 ? -1 : 0) : activeIndex;
 
         for (let step = 1; step <= options.length; step++) {
-            const index =
-                (((start + direction * step) % options.length) + options.length) % options.length;
+            const index = (((start + direction * step) % options.length) + options.length) % options.length;
+
             if (!options[index].disabled) {
                 activeIndex = index;
+
                 return;
             }
         }
@@ -113,8 +108,12 @@
         else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
             event.preventDefault();
             const direction = event.key === "ArrowDown" ? 1 : -1;
-            if (!open) reveal(direction);
-            else navigate(direction);
+
+            if (!open) {
+                reveal(direction);
+            } else {
+                navigate(direction);
+            }
         } else if (event.key === "Enter" || (!searchable && event.key === " ")) {
             event.preventDefault();
             if (!open) reveal();
@@ -134,6 +133,7 @@
         ) {
             event.preventDefault();
             if (!open) reveal();
+
             const now = Date.now();
             typeAhead = now - lastTypedAt > 700 ? event.key : typeAhead + event.key;
             lastTypedAt = now;
@@ -141,6 +141,7 @@
                 (item) =>
                     !item.disabled && item.label.toLowerCase().startsWith(typeAhead.toLowerCase())
             );
+
             if (index >= 0) activeIndex = index;
         }
     }
@@ -151,8 +152,7 @@
             window.innerHeight - rect.bottom < 200 && rect.top > window.innerHeight - rect.bottom;
 
         panel.style.width = Math.min(rect.width, window.innerWidth - 16) + "px";
-        panel.style.left =
-            Math.max(8, Math.min(rect.left, window.innerWidth - rect.width - 8)) + "px";
+        panel.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - rect.width - 8)) + "px";
         panel.style.top = above ? "auto" : rect.bottom + 4 + "px";
         panel.style.bottom = above ? window.innerHeight - rect.top + 4 + "px" : "auto";
         panel.style.maxHeight =
@@ -166,6 +166,7 @@
     $effect(() => {
         if (!expanded) {
             panel?.hidePopover();
+
             return;
         }
 
@@ -175,8 +176,10 @@
         const outside = (event: PointerEvent) => {
             if (event.target instanceof Node && !root.contains(event.target)) close();
         };
+
         const reposition = (event: Event) => {
             if (event.target instanceof Node && panel.contains(event.target)) return;
+
             positionPanel();
         };
 
@@ -208,6 +211,7 @@
         };
 
         form?.addEventListener("reset", reset);
+
         return () => form?.removeEventListener("reset", reset);
     });
 </script>
@@ -353,7 +357,7 @@
                     class="empty-options"
                     role="status"
                 >
-                    {loading ? "Loading…" : "No matching options"}
+                    {loading ? "Loading..." : "No matching options"}
                 </p>
             {/each}
         </div>

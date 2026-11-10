@@ -19,9 +19,7 @@
 
 </script>
 
-<!-- Header -->
 <div class={__class_container__computed}>
-    <!-- back button -->
     <GoBackButton
         title={title}
         __class__button={__class__button_computed}
@@ -29,7 +27,6 @@
         __class__title={__class__title_computed}
     />
 
-    <!-- role badge -->
     {#if showRoleBadge}
         <div class="w-full flex justify-end">
             <span

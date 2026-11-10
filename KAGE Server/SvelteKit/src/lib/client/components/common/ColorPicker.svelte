@@ -1,10 +1,9 @@
 <script lang="ts">
-    import iro from '@jaames/iro'; // Simple import
+    import iro from '@jaames/iro';
     import { onMount } from 'svelte';
 
     let {
         color = $bindable(),
-        // Use string identifiers instead of objects for props
         layout = [
             { component: 'Box' },
             { component: 'Slider', options: { sliderType: 'hue' } }
@@ -36,7 +35,7 @@
 
         if (color === '' || color === undefined || color === null) {
             color = '#ffffff';
-            console.warn('No initial color provided to ColorPicker, defaulting to #ffed00');
+            console.warn('ColorPicker has no initial color. Using #ffffff.');
         }
 
 
@@ -71,13 +70,12 @@
                     colorPicker.setByLink = true;
                     colorPicker.color.set(color);
                 } catch (e) {
-                    console.error('Invalid color value provided to ColorPicker:', color);
+                    console.error('Invalid ColorPicker color:', color);
                 }
             }
         }
 
         const handleClickOutside = (event: MouseEvent) => {
-            // If the click is NOT inside our container, close the picker
             if (containerElement && !containerElement.contains(event.target as Node)) {
                 toggleColorPicker = false;
             }
@@ -103,9 +101,9 @@
             style="background-color: {color}"
             onclick={() => toggleColorPicker = !toggleColorPicker}
             aria-label="Toggle Color Picker"
-        ></button>
+        >
+        </button>
 
-        <!-- Use svelte:element or simply ensure visibility -->
         <div class="absolute p-5 -translate-x-full left-full top-10 rounded-2xl bg-white border shadow-xl {toggleColorPicker ? 'block' : 'hidden'}">
             <div bind:this={pickerElement}></div>
 

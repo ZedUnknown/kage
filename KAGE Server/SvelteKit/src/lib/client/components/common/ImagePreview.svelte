@@ -23,6 +23,7 @@
 
 	$effect(() => {
 		if (!browser) return;
+
 		if (show && previewElement) {
 			document.body.appendChild(previewElement);
 			window.addEventListener('keydown', handleKeyDown);
@@ -36,14 +37,15 @@
 
 	onDestroy(() => {
 		if (!browser) return;
+
 		window.removeEventListener('keydown', handleKeyDown);
 		show = false;
 
 		if (previewElement && previewElement.parentNode === document.body) {
 			document.body.removeChild(previewElement);
 		}
-		// NOTE: If multiple modals can stack in the future, direct "unset" may
-		// re-enable page scroll too early. Consider a shared body-scroll lock manager.
+		// NOTE: Resetting overflow can unlock scrolling too soon if modals are stacked.
+		// Use a shared scroll lock if stacked modals are added.
 		document.body.style.overflow = 'unset';
 	});
 </script>

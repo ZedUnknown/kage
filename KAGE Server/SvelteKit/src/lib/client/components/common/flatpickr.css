@@ -1,0 +1,60 @@
+/* Shared vendor skin. Imported after flatpickr defaults by both date pickers. */
+
+.flatpickr-calendar {
+	margin-top: 0.5rem !important;
+	border-radius: 0.75rem !important;
+	padding: 1.25rem !important;
+	color: var(--color-gray-500) !important; /* gray-500 */
+	width: auto !important;
+}
+
+.flatpickr-calendar.arrowTop:before,
+.flatpickr-calendar.arrowTop:after {
+	display: none;
+}
+
+.flatpickr-current-month .cur-month,
+.flatpickr-current-month input.cur-year {
+	height: auto !important;
+	padding-top: 0 !important;
+	font-size: 1.125rem !important; /* text-lg */
+	line-height: 1.75rem !important;
+	font-weight: 500 !important;
+	color: var(--color-gray-800) !important; /* gray-800 */
+}
+
+.flatpickr-prev-month,
+.flatpickr-next-month {
+	padding: 0 !important;
+}
+
+.flatpickr-weekdays {
+	margin-top: 1.5rem;
+	margin-bottom: 1rem;
+	height: auto;
+}
+
+.flatpickr-weekday {
+	font-size: 0.875rem !important; /* text-sm */
+	line-height: 1.25rem !important;
+	font-weight: 500 !important;
+}
+
+.flatpickr-months .flatpickr-prev-month,
+.flatpickr-months .flatpickr-next-month {
+	top: 1.75rem !important;
+}
+
+.flatpickr-months .flatpickr-prev-month.flatpickr-prev-month,
+.flatpickr-months .flatpickr-next-month.flatpickr-prev-month {
+	left: 1.75rem !important;
+}
+
+.flatpickr-months .flatpickr-prev-month.flatpickr-next-month,
+.flatpickr-months .flatpickr-next-month.flatpickr-next-month {
+	right: 1.75rem !important;
+}
+
+.flatpickr-calendar.static {
+	right: 0;
+}

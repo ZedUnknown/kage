@@ -24,9 +24,12 @@
 		) => Promise<boolean | undefined>;
 		onclose: () => void;
 	} = $props();
+
 	let dialog: HTMLDialogElement;
 	const toasterId = $props.id();
 	let backdropPressed = false;
+	let clientUsername = $state('');
+	let deviceToken = $state('');
 	const title = $derived(
 		kind === 'brokers' ? 'Add broker' : kind === 'hubs' ? 'Register hub' : 'Register client'
 	);
@@ -37,6 +40,7 @@
 				? 'Register a hub under Hubs before registering a client.'
 				: ''
 	);
+
 	onMount(() => {
 		const previousOverflow = document.body.style.overflow;
 		document.body.style.overflow = 'hidden';
@@ -45,17 +49,22 @@
 		const dependencyToast = missingDependency
 			? toast.warning(missingDependency, { toasterId, duration: Number.POSITIVE_INFINITY })
 			: undefined;
+
 		return () => {
 			if (dependencyToast !== undefined) toast.dismiss(dependencyToast);
+
 			dialog.close();
 			document.body.style.overflow = previousOverflow;
 		};
 	});
+
 	function close() {
 		if (!busy) dialog.close();
 	}
+
 	function outside(event: PointerEvent) {
 		const bounds = dialog.getBoundingClientRect();
+
 		return (
 			event.target === dialog &&
 			(event.clientX < bounds.left ||
@@ -64,10 +73,24 @@
 				event.clientY > bounds.bottom)
 		);
 	}
+
 	async function submit(event: SubmitEvent) {
 		event.preventDefault();
 		if (busy || missingDependency) return;
+
 		const fields = Object.fromEntries(new FormData(event.currentTarget as HTMLFormElement));
+
+		if (kind === 'clients' && Boolean(fields.username) !== Boolean(fields.token)) {
+			toast.error(
+				'Provide both the MQTT username and token, or leave both blank to generate credentials.',
+				{
+					toasterId
+				}
+			);
+
+			return;
+		}
+
 		const saved = await oncreate(
 			kind,
 			{
@@ -77,6 +100,7 @@
 			},
 			toasterId
 		);
+
 		if (saved) dialog.close();
 	}
 </script>
@@ -122,16 +146,15 @@
 				{#if kind === 'brokers'}
 					<label>Broker name<input name="name" required placeholder="Laboratory MQTT" /></label>
 					<label>Hostname<input name="hostname" required placeholder="mqtt.example.com" /></label>
-					<label
-						>TLS port<input
+					<label>TLS port<input
 							name="port"
 							type="number"
 							value="8883"
 							min="1"
 							max="65535"
 							required
-						/></label
-					>
+						/>
+					</label>
 					<label>Server MQTT username<input name="username" required autocomplete="off" /></label>
 					<div class="form-field">
 						<label for="broker-password">Server MQTT password</label><SensitiveInput
@@ -142,24 +165,23 @@
 							autocomplete="new-password"
 						/>
 					</div>
-					<label
-						>Custom CA certificate (optional)<textarea
+					<label>Custom CA certificate (optional)<textarea
 							name="ca_certificate"
 							rows="3"
-							placeholder="PEM-encoded CA certificate"></textarea></label
-					>
+							placeholder="PEM-encoded CA certificate"
+						></textarea>
+					</label>
 				{:else}
 					<label>Display name<input name="name" required /></label>
 					{#if kind === 'hubs'}
-						<label
-							>Hub ID / MQTT username<input
+						<label>Hub ID / MQTT username<input
 								name="hub_id"
 								pattern="[A-Za-z0-9_-]+"
 								maxlength="64"
 								placeholder="HUB-01"
 								required
-							/></label
-						>
+							/>
+						</label>
 						<div class="form-field">
 							<label for="registration-broker">Broker</label>
 							<SearchDropDown
@@ -173,15 +195,14 @@
 							/>
 						</div>
 					{:else}
-						<label
-							>Client ID<input
+						<label>Client ID<input
 								name="pc_id"
 								pattern="[A-Za-z0-9_-]+"
 								maxlength="64"
 								placeholder="PC-01"
 								required
-							/></label
-						>
+							/>
+						</label>
 						<div class="form-field">
 							<label for="registration-hub">Hub</label>
 							<SearchDropDown
@@ -194,15 +215,28 @@
 								items={hubs.map((hub) => ({ value: hub.id, label: hub.hub_id }))}
 							/>
 						</div>
-						<label>Existing broker username (optional)<input name="username" /></label>
+						<label>Existing broker username (optional)<input
+								name="username"
+								bind:value={clientUsername}
+								pattern="[A-Za-z0-9_-]+"
+								maxlength="64"
+								required={!!deviceToken}
+								aria-describedby="client-credentials-help"
+							/>
+						</label>
+						<p id="client-credentials-help" class="muted">
+							Provide both the MQTT username and token, or leave both blank to generate credentials.
+						</p>
 					{/if}
 					<div class="form-field">
 						<label for="broker-token">Existing broker token (optional)</label><SensitiveInput
 							id="broker-token"
 							name="token"
+							bind:value={deviceToken}
 							type="password"
 							autocomplete="new-password"
-							required={false}
+							required={kind === 'clients' && !!clientUsername}
+							aria-describedby={kind === 'clients' ? 'client-credentials-help' : undefined}
 							placeholder="Leave blank to generate securely"
 						/>
 					</div>
@@ -215,9 +249,7 @@
 		</div>
 		<footer class="drawer-footer">
 			<button type="button" class="secondary" disabled={busy} onclick={close}>Cancel</button>
-			<button type="submit" disabled={busy || !!missingDependency}
-				>{busy ? 'Saving…' : title}</button
-			>
+			<button type="submit" disabled={busy || !!missingDependency}>{busy ? 'Saving...' : title}</button>
 		</footer>
 	</form>
 	<Toaster id={toasterId} theme="dark" position="top-right" richColors closeButton />

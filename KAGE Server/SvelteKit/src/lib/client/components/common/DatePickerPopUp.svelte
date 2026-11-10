@@ -24,14 +24,14 @@
         thisMonth = [_thisMonthStart, _thisMonthEnd],
         lastMonth = [_lastMonthStart, _lastMonthEnd],
 
-        defaultSelectedRange = today, // default selected range when popup opens
+        defaultSelectedRange = today,
 
-        onCloseTrigger = () => {}, // callback function to trigger/close the popup
+        onCloseTrigger = () => {},
         onDateRangeChange = () => {},
         onApply = () => {},
 
     }: {
-        today?: [string, string]; // same day for start and end to keep data type consistent
+        today?: [string, string]; // Repeat the date to keep the [start, end] shape.
         thisWeek?: [string, string];
         thisMonth?: [string, string];
         lastMonth?: [string, string];
@@ -80,7 +80,6 @@
 	<div class="w-full min-h-screen flex flex-col text-center pointer-events-none">
         <div class="my-auto flex flex-col justify-center items-center">
 
-            <!-- Container -->
             <div class="flex flex-col gap-5 px-6 py-4 pointer-events-auto form-container relative sm:max-w-md w-full bg-white border border-b-2 border-gray-300 rounded-xl shadow-lg backdrop-blur-xs">
 
                 <div>

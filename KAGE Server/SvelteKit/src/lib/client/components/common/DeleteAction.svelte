@@ -1,6 +1,7 @@
 <script lang="ts">
 	import ConfirmationPopup from './ConfirmationPopup.svelte';
 	import Trash from '../icons/Trash.svelte';
+
 	let {
 		label = 'Delete',
 		title,
@@ -14,6 +15,7 @@
 		disabled?: boolean;
 		onconfirm: (toasterId: string) => Promise<boolean | void>;
 	} = $props();
+
 	let open = $state(false);
 </script>
 

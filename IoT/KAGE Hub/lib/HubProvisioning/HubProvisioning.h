@@ -7,14 +7,7 @@
 #include <Preferences.h>
 #include "HubTrust.h"
 #include "SetupPage.h"
-
-// ESP32 DevKit onboard LED. Default override for a different board or polarity.
-#ifndef KAGE_LED_PIN
-#define KAGE_LED_PIN 2
-#endif
-#ifndef KAGE_LED_ACTIVE_LEVEL
-#define KAGE_LED_ACTIVE_LEVEL HIGH
-#endif
+#include <LEDStates.h>
 
 namespace HubProvisioning {
 
@@ -25,10 +18,7 @@ namespace HubProvisioning {
     static unsigned long savedAt = 0;
     static bool ledTestRunning = false;
     static unsigned long ledTestStartedAt = 0;
-
-    void setTestLED(bool on) {
-        digitalWrite(KAGE_LED_PIN, on ? KAGE_LED_ACTIVE_LEVEL : !KAGE_LED_ACTIVE_LEVEL);
-    }
+    constexpr unsigned long LED_TEST_LOCK_DURATION_MS = 2000; // identifyLED: five 300 ms flashes and 100 ms gaps.
 
     bool rejectDuringRestart() {
         server.sendHeader("Cache-Control", "no-store");
@@ -43,10 +33,6 @@ namespace HubProvisioning {
 
     // [Start Temporary Wi-Fi and Web Server]
     void start() {
-
-        pinMode(KAGE_LED_PIN, OUTPUT);
-        setTestLED(false);
-
         String apName = "KAGE-HUB-" +
             String((uint32_t)ESP.getEfuseMac(), HEX);
 
@@ -80,7 +66,7 @@ namespace HubProvisioning {
             }
             ledTestStartedAt = millis();
             ledTestRunning = true;
-            setTestLED(true);
+            identifyLED();
             server.send(200, "text/plain", "LED test started.");
         });
 
@@ -211,17 +197,12 @@ namespace HubProvisioning {
         server.handleClient();
 
         if (ledTestRunning) {
-            unsigned long elapsed = millis() - ledTestStartedAt;
-            if (elapsed >= 1200) {
+            if (millis() - ledTestStartedAt >= LED_TEST_LOCK_DURATION_MS) {
                 ledTestRunning = false;
-                setTestLED(false);
-            } else {
-                setTestLED((elapsed / 200) % 2 == 0);
             }
         }
 
         if (restartPending && millis() - savedAt >= 1500) {
-            setTestLED(false);
             ESP.restart();
         }
         delay(1);

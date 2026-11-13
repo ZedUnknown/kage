@@ -42,9 +42,7 @@ export const POST: RequestHandler = async (event) => {
 			httpOnly: true,
 			sameSite: 'lax',
 			maxAge: 7 * 86400,
-			secure:
-				new URL(process.env.ORIGIN || event.url.origin).protocol === 'https:' ||
-				process.env.NODE_ENV === 'production'
+			secure: event.url.protocol === 'https:' || process.env.NODE_ENV === 'production'
 		});
 
 		return json({ ok: true });

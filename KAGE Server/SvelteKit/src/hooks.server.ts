@@ -1,12 +1,19 @@
 import { json, redirect } from '@sveltejs/kit';
 import type { Handle, HandleServerError } from '@sveltejs/kit/hooks';
 import { accountForSession } from '#lib/server/auth.ts';
+import { allowedOrigins } from '#lib/server/origin.ts';
 
 export const handle: Handle = async ({ event, resolve }) => {
 	const { pathname } = event.url;
+	if (
+		process.env.NODE_ENV === 'production' &&
+		!allowedOrigins(process.env.CORS_ALLOW_ORIGINS).has(event.url.origin)
+	) {
+		return new Response('Invalid request host', { status: 403 });
+	}
 
 	if (pathname.startsWith('/api/') && !['GET', 'HEAD', 'OPTIONS'].includes(event.request.method)) {
-		if (event.request.headers.get('origin') !== (process.env.ORIGIN || event.url.origin)) {
+		if (event.request.headers.get('origin') !== event.url.origin) {
 			return json({ error: 'Invalid request origin' }, { status: 403 });
 		}
 		if (Number(event.request.headers.get('content-length') || 0) > 32768) {

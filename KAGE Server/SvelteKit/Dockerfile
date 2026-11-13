@@ -11,8 +11,6 @@ COPY scripts ./scripts
 COPY db_migrations ./db_migrations
 COPY vite.config.ts tsconfig.json ./
 
-ARG ORIGIN
-ENV ORIGIN=${ORIGIN}
 # SvelteKit validates these names during route analysis. Real values are runtime only.
 RUN DATABASE_HOST=localhost \
     DATABASE_PORT=5432 \

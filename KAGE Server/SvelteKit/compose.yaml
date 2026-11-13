@@ -2,59 +2,44 @@ x-app-environment: &app-environment
   NODE_ENV: production
   HOST: 0.0.0.0
   PORT: 8060
-  ORIGIN: ${ORIGIN:?Set ORIGIN in .env.docker}
+  PROTOCOL_HEADER: x-forwarded-proto
+  CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:?Set CORS_ALLOW_ORIGINS in .env}
+  DO_NOT_TRACK: ${DO_NOT_TRACK:-true}
   BODY_SIZE_LIMIT: 32K
-  DATABASE_HOST: db
-  DATABASE_PORT: 5432
-  DATABASE_NAME: ${DATABASE_NAME:-kage}
-  DATABASE_USER: ${DATABASE_USER:-kage}
-  DATABASE_PASSWORD: ${DATABASE_PASSWORD:?Set DATABASE_PASSWORD in .env.docker}
-  KAGE_ENCRYPTION_KEY: ${KAGE_ENCRYPTION_KEY:?Set KAGE_ENCRYPTION_KEY in .env.docker}
+  DATABASE_HOST: host.docker.internal
+  DATABASE_PORT: ${DATABASE_PORT:-5432}
+  DATABASE_NAME: ${DATABASE_NAME:?Set DATABASE_NAME in .env}
+  DATABASE_USER: ${DATABASE_USER:?Set DATABASE_USER in .env}
+  DATABASE_PASSWORD: ${DATABASE_PASSWORD:?Set DATABASE_PASSWORD in .env}
+  ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Set ENCRYPTION_KEY in .env}
 
 x-app-dependencies: &app-dependencies
-  db:
-    condition: service_healthy
   migrate:
     condition: service_completed_successfully
 
 services:
-  db:
-    image: postgres:17-alpine
-    environment:
-      POSTGRES_DB: ${DATABASE_NAME:-kage}
-      POSTGRES_USER: ${DATABASE_USER:-kage}
-      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:?Set DATABASE_PASSWORD in .env.docker}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
-      interval: 5s
-      timeout: 3s
-      retries: 12
-    restart: unless-stopped
-
   migrate:
     build:
       context: .
-      args:
-        ORIGIN: ${ORIGIN:?Set ORIGIN in .env.docker}
-    image: kage-sveltekit:local
+    image: ${DOCKER_IMAGE_NAME:?Set DOCKER_IMAGE_NAME in .env}
     command: ["node", "scripts/migrate.ts"]
     environment: *app-environment
-    depends_on:
-      db:
-        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: "no"
 
   web:
-    image: kage-sveltekit:local
-    command: ["node", "build"]
+    image: ${DOCKER_IMAGE_NAME:?Set DOCKER_IMAGE_NAME in .env}
+    container_name: ${DOCKER_CONTAINER_PREFIX:?Set DOCKER_CONTAINER_PREFIX in .env}-web
+    command: ["node", "scripts/start.mjs"]
     environment: *app-environment
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on: *app-dependencies
     ports:
-      - "127.0.0.1:${KAGE_PORT:-8060}:8060"
+      - "127.0.0.1:${HOST_PORT:-8060}:8060"
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8060/auth').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))"]
+      test: ["CMD", "node", "-e", "const http = require('node:http'); const origin = new URL(process.env.CORS_ALLOW_ORIGINS.split(';')[0]); http.get({ hostname: '127.0.0.1', port: 8060, path: '/auth', headers: { Host: origin.host, 'X-Forwarded-Proto': origin.protocol.slice(0, -1) } }, r => { r.resume(); process.exitCode = r.statusCode === 200 ? 0 : 1 }).on('error', () => process.exitCode = 1)"]
       interval: 30s
       timeout: 5s
       start_period: 15s
@@ -62,11 +47,11 @@ services:
     restart: unless-stopped
 
   worker:
-    image: kage-sveltekit:local
+    image: ${DOCKER_IMAGE_NAME:?Set DOCKER_IMAGE_NAME in .env}
+    container_name: ${DOCKER_CONTAINER_PREFIX:?Set DOCKER_CONTAINER_PREFIX in .env}-worker
     command: ["node", "scripts/mqtt-worker.ts"]
     environment: *app-environment
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on: *app-dependencies
     restart: unless-stopped
-
-volumes:
-  postgres_data:

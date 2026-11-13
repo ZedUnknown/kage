@@ -5,9 +5,9 @@ export const token = () => randomBytes(32).toString('base64url');
 export const digest = (value: string) => createHash('sha256').update(value).digest('hex');
 
 function key() {
-	const value = Buffer.from(required('KAGE_ENCRYPTION_KEY'), 'base64');
+	const value = Buffer.from(required('ENCRYPTION_KEY'), 'base64');
 
-	if (value.length !== 32) throw new Error('KAGE_ENCRYPTION_KEY must encode 32 bytes');
+	if (value.length !== 32) throw new Error('ENCRYPTION_KEY must encode 32 bytes');
 
 	return value;
 }

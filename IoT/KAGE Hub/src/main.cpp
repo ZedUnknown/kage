@@ -526,6 +526,7 @@ bool connectToMQTT() {
 
         } else {
             Serial.print("Failed to connect, rc=");
+            blinkLED(3); // Blink three times to indicate MQTT connection failure
 
             int state = mqttClient.state();
             Serial.println(state);
@@ -590,6 +591,8 @@ void checkMQTTConnection() {
             if (mqttPingAttempts >= mqttPingMaxAttempts) {
                 if (mqttBrokerReached) {
                     Serial.println("Broker login succeeded but KAGE admin did not reply. Retrying in 30 seconds.");
+                    blinkLED(3); // Blink three times to indicate MQTT ping failure
+
                     mqttPingStartedAt = millis();
                     mqttPingStatus = MQTTPingStatus::RetryDelay;
                     return;

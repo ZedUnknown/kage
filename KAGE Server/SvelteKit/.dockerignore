@@ -1,0 +1,14 @@
+.git
+.gitignore
+.env*
+node_modules
+.svelte-kit
+build
+.verification
+.vscode
+tests
+docs
+*.log
+*-verification.log
+**/*.key
+**/*.pem

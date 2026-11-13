@@ -6,9 +6,12 @@
 #include <cJSON.h>
 #include <sys/time.h>
 #include <KageHNProtocol.h>
+#include <KageHubButton.h>
 #include <Declarations.h>
 #include <SyncTime.h>
 #include <HubProvisioning.h>
+#include <LEDStates.h>
+
 
 String live_prefix = "kage/hub/live/";
 
@@ -523,6 +526,7 @@ bool connectToMQTT() {
 
         } else {
             Serial.print("Failed to connect, rc=");
+            blinkLED(3); // Blink three times to indicate MQTT connection failure
 
             int state = mqttClient.state();
             Serial.println(state);
@@ -587,6 +591,8 @@ void checkMQTTConnection() {
             if (mqttPingAttempts >= mqttPingMaxAttempts) {
                 if (mqttBrokerReached) {
                     Serial.println("Broker login succeeded but KAGE admin did not reply. Retrying in 30 seconds.");
+                    blinkLED(3); // Blink three times to indicate MQTT ping failure
+
                     mqttPingStartedAt = millis();
                     mqttPingStatus = MQTTPingStatus::RetryDelay;
                     return;
@@ -1217,13 +1223,30 @@ void startHub() {
     }
 }
 
-// ======================================================================
 
+// ==========[PINS]==========
+uint8_t ledPin = 14; // Pin for the LED
+uint8_t buttonPin = 27; // Pin for the button
+
+// ===========[SETUP]==========
 void setup() {
     Serial.begin(115200); // Serial communication at 115200 baud
+
+    // [Setup LED]
+    if (!setupLED(ledPin)) {
+        Serial.println("Failed to create LED update task. Restarting...");
+        ESP.restart();
+        return;
+    }
+
+    finiteBreathLED(800, 3);
+
     delay(3000); // Wait for Serial to initialize
 
     Serial.println("KAGE ESP32 boot successful!");
+
+    // [Register Pin Modes]
+    pinMode(buttonPin, INPUT_PULLUP);
 
     // [DEBUGGING]
     // clearPairedNodes();
@@ -1285,6 +1308,42 @@ void loop() {
         HubProvisioning::start();
         return;
     }
+
+
+    // [Handle Button Hold]
+    handleButtonHold(
+        buttonPin,
+        []() {
+            Serial.println("Button Identifying Hub.");
+            identifyLED();
+        },
+        []() {
+            Serial.println("Button No Action.");
+        },
+        []() {
+            Serial.println("Button held for 10 seconds. Starting Hub provisioning.");
+            blinkLED(10);
+            HubProvisioning::start();
+        }
+    );
+    if (HubProvisioning::active) return;
+
+    // [Handle Button Press]
+    handleButtonPress(
+        buttonPin,
+        []() { // Single Press
+            Serial.println("Button Pressed: Once.");
+            blinkLED(1);
+        },
+        []() { // Double Press
+            Serial.println("Button Pressed: Twice.");
+            blinkLED(2);
+        },
+        []() { // Triple Press
+            Serial.println("Button Pressed: Thrice.");
+            blinkLED(3);
+        }
+    );
 
     // To prevent the ESP32 from being overwhelmed by incoming ESP-NOW packets
     processPackets();

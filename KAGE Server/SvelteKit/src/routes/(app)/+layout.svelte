@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, untrack } from 'svelte';
-	import { afterNavigate } from '$app/navigation';
+	import { afterNavigate, beforeNavigate } from '$app/navigation';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { provideWorkspace } from '#lib/client/workspace.svelte.ts';
@@ -19,11 +19,15 @@
 	import ClassicSidebar from '#lib/client/components/icons/ClassicSidebar.svelte';
 	import XCircle from '#lib/client/components/icons/XCircle.svelte';
 	import PullToRefresh from '#lib/client/components/common/PullToRefresh.svelte';
+	import LogoLoader from '#lib/client/components/common/LogoLoader.svelte';
 
 	let { data, children }: LayoutProps = $props();
 
 	const workspace = provideWorkspace(untrack(() => data));
 	let sidebarCollapsed = $state(false);
+	let sidebarReady = $state(false);
+	let initialLoading = $state(true);
+	let navigationLoading = $state(false);
 	const tabs = [
 		{ label: 'Dashboard', href: '/(app)', icon: Home },
 		{ label: 'Brokers', href: '/(app)/brokers', icon: HardDrives },
@@ -42,6 +46,16 @@
 	});
 	afterNavigate(() => {
 		workspace.mobileOpen = false;
+		navigationLoading = false;
+	});
+	beforeNavigate(({ from, to, willUnload }) => {
+		if (
+			willUnload ||
+			!to?.route.id ||
+			(to.url.pathname === from?.url.pathname && to.url.search === from?.url.search)
+		)
+			return;
+		navigationLoading = true;
 	});
 
 	onMount(() => {
@@ -59,10 +73,12 @@
 		};
 
 		updateViewport();
+		if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) initialLoading = false;
 		media.addEventListener('change', updateViewport);
 		const timer = setInterval(() => {
 			if (!document.hidden && !workspace.busy) void workspace.refresh();
 		}, 10000);
+		sidebarReady = true;
 
 		return () => {
 			clearInterval(timer);
@@ -98,6 +114,7 @@
 		if (event.key === 'Escape' && workspace.mobileOpen) void workspace.closeMobileMenu();
 	}}
 />
+{#if sidebarReady}
 <div class="app-shell" class:sidebar-collapsed={sidebarCollapsed}>
 	{#if workspace.mobileOpen}<button
 			type="button"
@@ -105,7 +122,7 @@
 			aria-label="Close navigation"
 			tabindex="-1"
 			onclick={workspace.closeMobileMenu}
-	>
+		>
 		</button>{/if}
 	<aside
 		id="workspace-sidebar"
@@ -139,13 +156,13 @@
 							: undefined}
 					title={sidebarCollapsed ? item.label : undefined}
 					onclick={() => (workspace.mobileOpen = false)}
-			>
-				<span class="nav-icon" aria-hidden="true"><item.icon properties="size-5" /></span><span
-						class="nav-text"
 				>
+					<span class="nav-icon" aria-hidden="true"><item.icon properties="size-5" /></span><span
+						class="nav-text"
+					>
 						{item.label}
-				</span>
-			</a>{/each}
+					</span>
+				</a>{/each}
 		</nav>
 		<div class="sidebar-collapse desktop-only">
 			<button
@@ -163,15 +180,32 @@
 	</aside>
 	<main class="workspace" inert={workspace.isMobile && workspace.mobileOpen}>
 		<PullToRefresh
-			onRefresh={workspace.refresh}
+			onRefresh={() => workspace.refresh(true)}
 			disabled={!workspace.isMobile || workspace.mobileOpen || workspace.busy}
 		>
 			{@render children()}
 		</PullToRefresh>
 	</main>
 </div>
+{/if}
+{#if !sidebarReady || initialLoading || navigationLoading || workspace.busy || workspace.foregroundLoading}
+	<div class="logo-loading" role="status" aria-label="Loading">
+		<LogoLoader onFirstRevealComplete={initialLoading ? () => (initialLoading = false) : undefined} />
+	</div>
+{/if}
 
 <style>
+	:global(html:has(.logo-loading)) {
+		overflow-y: scroll;
+	}
+	.logo-loading {
+		position: fixed;
+		z-index: 60;
+		inset: 0;
+		display: grid;
+		place-items: center;
+		background: #06070b;
+	}
 	.app-shell {
 		--sidebar-width: 244px;
 		--workspace-header-height: 95px;

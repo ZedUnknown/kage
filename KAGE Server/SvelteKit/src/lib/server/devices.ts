@@ -3,12 +3,20 @@ import type pg from 'pg';
 import type { Account } from './auth.ts';
 import { pool, transaction } from './db/postgres.ts';
 import { decrypt, encrypt, token } from './security.ts';
-import { InputError, integer, password, secret as secretValue, segment, text, uuid } from './validation.ts';
+import {
+	InputError,
+	integer,
+	password,
+	secret as secretValue,
+	segment,
+	text,
+	uuid
+} from './validation.ts';
 import { hostname, resolveBroker } from './network.ts';
 import { activeStatuses, capabilities } from './mqtt/lifecycle.ts';
 import { probeBroker, probeConnection, probeClientConnection } from './mqtt/probe.ts';
 import { probeConnectionError } from './mqtt/probe-errors.ts';
-import { deleteResource } from './deletion.ts';
+import { deleteResource, forceUnpairNode } from './deletion.ts';
 import { occupancyTimeoutSeconds } from './mqtt/occupancy.ts';
 
 async function audit(db: pg.PoolClient, user: Account, action: string, id?: string) {
@@ -65,7 +73,9 @@ export async function dashboard(user: Account) {
 			JOIN kage_mqtt_brokers b ON b.tenant_id=h.tenant_id AND b.id=h.broker_id
 			LEFT JOIN kage_node_client_mappings m ON m.tenant_id=n.tenant_id AND m.node_id=n.id
 			LEFT JOIN kage_clients c ON c.tenant_id=m.tenant_id AND c.id=m.client_id WHERE n.tenant_id=$1 ORDER BY n.mac_address`,
-		pairing: `SELECT p.*,h.hub_id AS hub_code FROM kage_pairing_requests p JOIN kage_hubs h ON h.tenant_id=p.tenant_id AND h.id=p.hub_id WHERE p.tenant_id=$1 ORDER BY p.last_seen DESC LIMIT 100`,
+		pairing: `SELECT p.*,CASE WHEN p.status IN ('pending','approved') AND p.expires_at<=now() THEN 'expired' ELSE p.status END AS status,
+			h.hub_id AS hub_code FROM kage_pairing_requests p JOIN kage_hubs h ON h.tenant_id=p.tenant_id AND h.id=p.hub_id
+			WHERE p.tenant_id=$1 ORDER BY (p.status IN ('pending','approved') AND p.expires_at>now()) DESC,p.last_seen DESC LIMIT 100`,
 		commands: `${visibleCommands}
 			SELECT id,kind,status,client_id,node_id,created_at,expires_at,published_at,report
 			FROM visible_commands ORDER BY created_at DESC,id DESC LIMIT 100`,
@@ -80,14 +90,20 @@ export async function dashboard(user: Account) {
 			client_disconnect_timeout_seconds,offline_enabled,offline_action,allow_recovery_code,inactivity_monitoring_enabled,
 			inactivity_timeout_seconds,confirmation_timeout_seconds FROM kage_security_policies WHERE tenant_id=$1`
 	};
-	const entries = await Promise.all(Object.entries(queries).map(async ([key, sql]) => [key, (await pool.query(sql, tenant)).rows] as const));
+	const entries = await Promise.all(
+		Object.entries(queries).map(
+			async ([key, sql]) => [key, (await pool.query(sql, tenant)).rows] as const
+		)
+	);
 	const result = Object.fromEntries(entries);
 	result.brokers = result.brokers.map((broker) => {
 		let ca_certificate_expires_at: string | null = null;
 
 		if (broker.ca_certificate) {
 			try {
-				ca_certificate_expires_at = new Date(new X509Certificate(broker.ca_certificate).validTo).toISOString();
+				ca_certificate_expires_at = new Date(
+					new X509Certificate(broker.ca_certificate).validTo
+				).toISOString();
 			} catch {
 				// Keep saved certificate downloads available even if metadata cannot be read.
 			}
@@ -121,13 +137,18 @@ export async function manage(user: Account, resource: string, input: Record<stri
 
 		if (!device) throw new InputError('Client not found', 404);
 		if (device.status !== 'admin_confirmed') {
-			throw new InputError('Confirm the client’s external provisioning before testing its connection.');
+			throw new InputError(
+				'Confirm the client’s external provisioning before testing its connection.'
+			);
 		}
 		if (!device.enabled) throw new InputError('Enable the broker before testing this Client.');
 		if (!device.acl_confirmed) {
 			throw new InputError("Pass the broker's device permissions test before testing this Client.");
 		}
-		if (!Array.isArray(device.capabilities) || !device.capabilities.includes('connection_test_v1')) {
+		if (
+			!Array.isArray(device.capabilities) ||
+			!device.capabilities.includes('connection_test_v1')
+		) {
 			throw new InputError('Update and reconnect the KAGE Client to enable connection testing.');
 		}
 
@@ -153,15 +174,21 @@ export async function manage(user: Account, resource: string, input: Record<stri
 		};
 	}
 
-	if (input.action === 'delete' && ['brokers', 'hubs', 'clients', 'nodes'].includes(resource)) {
+	const forceDeleteHub = resource === 'hubs' && input.action === 'force_delete';
+	if (
+		(input.action === 'delete' && ['brokers', 'hubs', 'clients', 'nodes'].includes(resource)) ||
+		forceDeleteHub
+	) {
 		const id = uuid(input.id);
 
 		return transaction(async (db) => {
-			const message = await deleteResource(db, tenant, resource, id);
+			const message = await deleteResource(db, tenant, resource, id, forceDeleteHub);
 			await audit(
 				db,
 				user,
-				`${resource === 'brokers' ? 'broker' : resource.slice(0, -1)}.delete`,
+				forceDeleteHub
+					? 'hub.force_delete'
+					: `${resource === 'brokers' ? 'broker' : resource.slice(0, -1)}.delete`,
 				id
 			);
 
@@ -265,7 +292,9 @@ export async function manage(user: Account, resource: string, input: Record<stri
 				).rows[0];
 
 				if (!device) {
-					throw new InputError('Register a Hub or Client and provision its credentials and ACL on the broker, then run this test.');
+					throw new InputError(
+						'Register a Hub or Client and provision its credentials and ACL on the broker, then run this test.'
+					);
 				}
 
 				const tested = await probeBroker(options, {
@@ -333,8 +362,7 @@ export async function manage(user: Account, resource: string, input: Record<stri
 					'UPDATE kage_mqtt_brokers SET enabled=NOT enabled,updated_at=now() WHERE tenant_id=$1 AND id=$2',
 					[tenant, id]
 				);
-			}
-			else if (input.action === 'credentials') {
+			} else if (input.action === 'credentials') {
 				const username = text(input.username, 'username');
 
 				if (
@@ -371,7 +399,9 @@ export async function manage(user: Account, resource: string, input: Record<stri
 
 			if (input.action === 'create') {
 				if (!isHub && Boolean(input.username) !== Boolean(input.token)) {
-					throw new InputError('Provide both the MQTT username and token, or leave both blank to generate credentials.');
+					throw new InputError(
+						'Provide both the MQTT username and token, or leave both blank to generate credentials.'
+					);
 				}
 
 				const id = randomUUID();
@@ -493,7 +523,8 @@ export async function manage(user: Account, resource: string, input: Record<stri
 			return {
 				username: credential.username,
 				token: secret,
-				message: 'Update the credentials on the external broker separately. When revoking credentials, also disconnect existing device sessions.'
+				message:
+					'Update the credentials on the external broker separately. When revoking credentials, also disconnect existing device sessions.'
 			};
 		}
 
@@ -601,6 +632,16 @@ export async function manage(user: Account, resource: string, input: Record<stri
 
 			if (!node) throw new InputError('Node not found', 404);
 
+			if (input.action === 'force_unpair') {
+				await forceUnpairNode(db, tenant, id);
+				await audit(db, user, 'node.force_unpair', id);
+				return {
+					ok: true,
+					message:
+						'Node force-unpaired in KAGE. Reset or re-pair the physical devices before using this Node again.'
+				};
+			}
+
 			if (input.action === 'identify') {
 				if (!node.paired) throw new InputError('Pair this Node before identifying it.');
 
@@ -616,7 +657,9 @@ export async function manage(user: Account, resource: string, input: Record<stri
 				).rows[0];
 
 				if (!hub) {
-					throw new InputError('Confirm Hub provisioning and enable a broker with a passed permission test.');
+					throw new InputError(
+						'Confirm Hub provisioning and enable a broker with a passed permission test.'
+					);
 				}
 
 				const commandId = randomUUID();
@@ -661,7 +704,14 @@ export async function manage(user: Account, resource: string, input: Record<stri
 			const kind = text(input.command, 'command');
 
 			if (
-				!['force_lock', 'force_logout', 'cancel_force_lock', 'cancel_force_logout', 'cancel_auto_lock', 'cancel_auto_logout'].includes(kind)
+				![
+					'force_lock',
+					'force_logout',
+					'cancel_force_lock',
+					'cancel_force_logout',
+					'cancel_auto_lock',
+					'cancel_auto_logout'
+				].includes(kind)
 			) {
 				throw new InputError('Unsupported Client command');
 			}
@@ -680,7 +730,10 @@ export async function manage(user: Account, resource: string, input: Record<stri
 				client.protocol_version !== 1 ||
 				!capabilities.every((c) => client.capabilities.includes(c))
 			) {
-				throw new InputError('Connect a Client supporting command lifecycle v1 before issuing commands', 409);
+				throw new InputError(
+					'Connect a Client supporting command lifecycle v1 before issuing commands',
+					409
+				);
 			}
 
 			const seconds = integer(input.delay_seconds ?? 30, 0, 3600);
@@ -891,7 +944,10 @@ export async function manage(user: Account, resource: string, input: Record<stri
 				).rows[0];
 
 				if (
-					!(await verifyPassword(secretValue(input.current_password, 'current password', 256), current.password_hash))
+					!(await verifyPassword(
+						secretValue(input.current_password, 'current password', 256),
+						current.password_hash
+					))
 				) {
 					throw new InputError('Current password is incorrect');
 				}

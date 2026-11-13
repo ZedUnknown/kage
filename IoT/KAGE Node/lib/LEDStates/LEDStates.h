@@ -1,7 +1,6 @@
 #pragma once
 
 #include <Arduino.h>
-#include <math.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #include <freertos/task.h>

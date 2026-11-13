@@ -4,31 +4,25 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WebServer.h>
+#include <DNSServer.h>
 #include <Preferences.h>
+#include <esp_netif.h>
 #include "HubTrust.h"
 #include "SetupPage.h"
-
-// ESP32 DevKit onboard LED. Default override for a different board or polarity.
-#ifndef KAGE_LED_PIN
-#define KAGE_LED_PIN 2
-#endif
-#ifndef KAGE_LED_ACTIVE_LEVEL
-#define KAGE_LED_ACTIVE_LEVEL HIGH
-#endif
+#include <LEDStates.h>
 
 namespace HubProvisioning {
 
     static WebServer server(80);
+    static DNSServer dnsServer;
+    static bool dnsActive = false;
 
     static bool active = false;
     static bool restartPending = false;
     static unsigned long savedAt = 0;
     static bool ledTestRunning = false;
     static unsigned long ledTestStartedAt = 0;
-
-    void setTestLED(bool on) {
-        digitalWrite(KAGE_LED_PIN, on ? KAGE_LED_ACTIVE_LEVEL : !KAGE_LED_ACTIVE_LEVEL);
-    }
+    constexpr unsigned long LED_TEST_LOCK_DURATION_MS = 2000; // identifyLED: five 300 ms flashes and 100 ms gaps.
 
     bool rejectDuringRestart() {
         server.sendHeader("Cache-Control", "no-store");
@@ -37,15 +31,35 @@ namespace HubProvisioning {
         return true;
     }
 
-    // [Hub Provisioning Wi-Fi AP Password]
+    // [Hub Provisioning Wi-Fi Password]
     const char* AP_PASSWORD = "admin1234";
+
+    void redirectToSetup() {
+        server.sendHeader("Cache-Control", "no-store");
+        server.sendHeader("Location", "http://192.168.4.1/");
+        server.send(302, "text/plain", "Open the KAGE Hub setup page.");
+    }
+
+    bool advertiseSetupDns() {
+        esp_netif_t* ap = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
+        if (!ap) return false;
+
+        const esp_err_t stopped = esp_netif_dhcps_stop(ap);
+        if (stopped != ESP_OK && stopped != ESP_ERR_ESP_NETIF_DHCP_ALREADY_STOPPED) return false;
+
+        esp_netif_dns_info_t dns = {};
+        dns.ip.type = ESP_IPADDR_TYPE_V4;
+        dns.ip.u_addr.ip4.addr = static_cast<uint32_t>(IPAddress(192, 168, 4, 1));
+        const esp_err_t configured = esp_netif_set_dns_info(ap, ESP_NETIF_DNS_MAIN, &dns);
+        const esp_err_t started = esp_netif_dhcps_start(ap);
+        return configured == ESP_OK &&
+            (started == ESP_OK || started == ESP_ERR_ESP_NETIF_DHCP_ALREADY_STARTED);
+    }
 
 
     // [Start Temporary Wi-Fi and Web Server]
     void start() {
-
-        pinMode(KAGE_LED_PIN, OUTPUT);
-        setTestLED(false);
+        if (active) return;
 
         String apName = "KAGE-HUB-" +
             String((uint32_t)ESP.getEfuseMac(), HEX);
@@ -53,6 +67,9 @@ namespace HubProvisioning {
         apName.toUpperCase();
 
         WiFi.mode(WIFI_AP);
+        if (!advertiseSetupDns()) {
+            Serial.println("Could not advertise Hub setup DNS in the Wi-Fi lease.");
+        }
 
         if (!WiFi.softAP(apName.c_str(), AP_PASSWORD)) {
             Serial.println("Failed to start Hub setup Wi-Fi.");
@@ -66,11 +83,26 @@ namespace HubProvisioning {
 
         // [Setup Web Page]
         server.on("/", HTTP_GET, []() {
+            const String host = server.hostHeader();
+            if (host.length() && host != "192.168.4.1" && host != "192.168.4.1:80") {
+                redirectToSetup();
+                return;
+            }
 
             server.sendHeader("Cache-Control", "no-store");
 
             server.send_P(200, "text/html; charset=utf-8", HUB_SETUP_PAGE);
         });
+
+        // captive portal paths for different operating systems
+        const char* const captiveProbePaths[] = {
+            "/generate_204", "/gen_204",             // Android
+            "/hotspot-detect.html", "/library/test/success.html", // iOS/macOS
+            "/connecttest.txt", "/ncsi.txt", "/redirect" // Windows
+        };
+        for (const char* path : captiveProbePaths) {
+            server.on(path, HTTP_GET, redirectToSetup);
+        }
 
         server.on("/test-led", HTTP_POST, []() {
             if (rejectDuringRestart()) return;
@@ -80,7 +112,7 @@ namespace HubProvisioning {
             }
             ledTestStartedAt = millis();
             ledTestRunning = true;
-            setTestLED(true);
+            identifyLED();
             server.send(200, "text/plain", "LED test started.");
         });
 
@@ -196,11 +228,34 @@ namespace HubProvisioning {
             restartPending = true;
         });
 
+        // Probe URLs differ by OS version. Keep the existing API paths out of
+        // the catchall, and redirect other HTTP GETs to the setup page.
+        server.onNotFound([]() {
+            const String uri = server.uri();
+            if (server.method() == HTTP_GET &&
+                uri != "/save" && uri != "/test-led" &&
+                !uri.startsWith("/root-ca")) {
+                redirectToSetup();
+                return;
+            }
+            server.send(404, "text/plain", "Not found");
+        });
+
 
         server.begin();
         active = true;
+        dnsActive = dnsServer.start(53, "*", WiFi.softAPIP());
+        if (!dnsActive) Serial.println("Captive portal DNS failed to start; use http://192.168.4.1.");
 
         Serial.println("Provisioning web server started.");
+    }
+
+    void stop() {
+        if (!active) return;
+        dnsServer.stop();
+        dnsActive = false;
+        server.stop();
+        active = false;
     }
 
 
@@ -208,20 +263,17 @@ namespace HubProvisioning {
     void update() {
         if (!active) return;
 
+        if (dnsActive) dnsServer.processNextRequest();
         server.handleClient();
 
         if (ledTestRunning) {
-            unsigned long elapsed = millis() - ledTestStartedAt;
-            if (elapsed >= 1200) {
+            if (millis() - ledTestStartedAt >= LED_TEST_LOCK_DURATION_MS) {
                 ledTestRunning = false;
-                setTestLED(false);
-            } else {
-                setTestLED((elapsed / 200) % 2 == 0);
             }
         }
 
         if (restartPending && millis() - savedAt >= 1500) {
-            setTestLED(false);
+            stop();
             ESP.restart();
         }
         delay(1);

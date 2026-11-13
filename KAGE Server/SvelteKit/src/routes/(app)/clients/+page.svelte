@@ -177,6 +177,10 @@
 </WorkspacePage>
 
 <style>
+	:global(.connection-filters) + .client-card,
+	:global(.connection-filters) + .empty-state {
+		margin-top: 32px;
+	}
 	.client-card {
 		padding: 22px;
 		transition:

@@ -3,8 +3,8 @@
 
 // [HOLD OPTIONS]
 const unsigned long SHORT_HOLD_DURATION = 2000; // 2 second
-const unsigned long LONG_HOLD_DURATION = 10000; // 10 seconds
-const unsigned long VERY_LONG_HOLD_DURATION = 20000; // 20 seconds
+const unsigned long LONG_HOLD_DURATION = 5000; // 5 seconds
+const unsigned long VERY_LONG_HOLD_DURATION = 10000; // 10 seconds
 
 // [Handle Button Press]
 const uint8_t ONE_PRESS = 1;

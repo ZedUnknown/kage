@@ -2,8 +2,11 @@ using System.Text.Json;
 using System.IO;
 using Microsoft.Win32;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using WpfBorder = System.Windows.Controls.Border;
+using WpfTextBlock = System.Windows.Controls.TextBlock;
 using KAGE_Client.Services;
 using Wpf.Ui.Controls;
 using KAGE_Client.Models;
@@ -61,6 +64,46 @@ public partial class SetupWindow : FluentWindow {
             StatusText.Text = message;
             StatusText.Foreground = Brushes.Red;
         }
+    }
+
+    private void RegistrationNoticeViewport_Loaded(object sender, RoutedEventArgs e) => AnimateRegistrationNotice();
+
+    private void RegistrationNoticeViewport_SizeChanged(object sender, SizeChangedEventArgs e) => AnimateRegistrationNotice();
+
+    private void AnimateRegistrationNotice() {
+        if (RegistrationNoticeViewport.ActualWidth <= 0
+            || RegistrationNoticeTrack.RenderTransform is not TranslateTransform transform) return;
+
+        RegistrationNoticeSegment.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        double segmentWidth = RegistrationNoticeSegment.DesiredSize.Width;
+        if (segmentWidth <= 0) return;
+
+        RegistrationNoticeTrack.Children.Clear();
+        RegistrationNoticeTrack.Children.Add(RegistrationNoticeSegment);
+        int segmentCount = Math.Max(2, (int)Math.Ceiling(RegistrationNoticeViewport.ActualWidth / segmentWidth) + 1);
+        for (int i = 1; i < segmentCount; i++) {
+            var segment = new StackPanel { Orientation = Orientation.Horizontal };
+            segment.Children.Add(new WpfTextBlock {
+                Text = RegistrationNoticeText.Text,
+                Foreground = RegistrationNoticeText.Foreground,
+                FontSize = RegistrationNoticeText.FontSize,
+                TextWrapping = TextWrapping.NoWrap,
+                VerticalAlignment = VerticalAlignment.Center
+            });
+            segment.Children.Add(new WpfBorder {
+                Width = RegistrationNoticeSeparator.Width,
+                Height = RegistrationNoticeSeparator.Height,
+                Background = RegistrationNoticeSeparator.Background,
+                Margin = RegistrationNoticeSeparator.Margin,
+                VerticalAlignment = VerticalAlignment.Center
+            });
+            RegistrationNoticeTrack.Children.Add(segment);
+        }
+
+        var animation = new DoubleAnimation(0, -segmentWidth, TimeSpan.FromSeconds(segmentWidth / 65)) {
+            RepeatBehavior = RepeatBehavior.Forever
+        };
+        transform.BeginAnimation(TranslateTransform.XProperty, animation);
     }
 
     private void UpdateTlsInputs() {

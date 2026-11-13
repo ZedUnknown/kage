@@ -638,18 +638,19 @@ void startNode(String _HubMacAddress, String _HubWiFiChannel) {
 uint8_t ledPin = 7; // Pin for the LED
 uint8_t buttonPin = 8; // Pin for the button
 
-// ======================================================================
-
+// ===========[SETUP]==========
 void setup() {
     Serial.begin(115200); // Serial communication at 115200 baud
 
-    // Start rendering before the serial wait or any finite effect timers.
+    // [Setup LED]
     if (!setupLED(ledPin)) {
         Serial.println("Failed to create LED update task. Restarting...");
         ESP.restart();
         return;
     }
+
     finiteBreathLED(800, 3);
+
     delay(3000); // Wait for Serial to initialize
 
     Serial.println("KAGE ESP32-C3 boot successful!");
@@ -659,8 +660,8 @@ void setup() {
     pinMode(buttonPin, INPUT_PULLUP);
 
     // [TESTING ONLY]
-    clearPairedHub();
-    clearPendingPairing();
+    // clearPairedHub();
+    // clearPendingPairing();
 
     // Read NVS
     String nvsReadResult = readNVS();

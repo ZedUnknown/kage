@@ -9,6 +9,7 @@
 	import SearchHighlight from '../components/common/SearchHighlight.svelte';
 	import { orderSearchResults } from '../search.ts';
 	import { resolve } from '$app/paths';
+	import { goto } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
 	import TreeView from '../components/icons/TreeView.svelte';
 	import Devices from '../components/icons/Devices.svelte';
@@ -23,6 +24,8 @@
 	import ConfirmationAction from '../components/common/ConfirmationAction.svelte';
 	import NetworkViewport from '../components/common/NetworkViewport.svelte';
 	import Check from '../components/icons/Check.svelte';
+	import Info from '../components/icons/Info.svelte';
+	import CaretDown from '../components/icons/CaretDown.svelte';
 
 	interface Hub {
 		id: string;
@@ -97,7 +100,9 @@
 		)
 	);
 	let hubQuery = $derived(hubSearch.trim());
-	let hubResults = $derived(orderSearchResults(filteredHubs, hubQuery, (item) => [item.name, item.hub_id, item.broker_name]));
+	let hubResults = $derived(
+		orderSearchResults(filteredHubs, hubQuery, (item) => [item.name, item.hub_id, item.broker_name])
+	);
 	let inspector = $state<HTMLElement>();
 	let settingsOpen = $state(false);
 	const operations = [
@@ -212,20 +217,25 @@
 			>
 				<span class="card-top">
 					<span class="chip-icon" aria-hidden="true"><TreeView properties="size-5" /></span>
-					<strong class="hub-name" title={item.name}><SearchHighlight text={item.name} query={hubQuery} /></strong>
+					<strong class="hub-name" title={item.name}
+						><SearchHighlight text={item.name} query={hubQuery} /></strong
+					>
 					<span class="hub-state-badge">
 						<span
 							class="connection-dot"
 							class:online={connectionStatus(item.connection_state) === 'online'}
 							aria-hidden="true"
 						>
-							</span>
+						</span>
 						<span class="hub-status">{item.connection_state || 'Unknown'}</span>
 					</span>
 				</span>
 				<span class="hub-card-body">
 					<span class="hub-identity">
-						<span class="hub-detail hub-identifier"><span class="detail-label">Hub ID</span><code title={item.hub_id}><SearchHighlight text={item.hub_id} query={hubQuery} /></code>
+						<span class="hub-detail hub-identifier"
+							><span class="detail-label">Hub ID</span><code title={item.hub_id}
+								><SearchHighlight text={item.hub_id} query={hubQuery} /></code
+							>
 						</span>
 						<span class="hub-detail">
 							<span class="detail-label">Status</span>
@@ -250,13 +260,16 @@
 				<span class="hub-card-bottom">
 					<span class="hub-broker">
 						<span aria-hidden="true"><HardDrives properties="size-5" /></span>
-						<span class="broker-name" title={item.broker_name}><span class="sr-only">Broker: </span><SearchHighlight
+						<span class="broker-name" title={item.broker_name}
+							><span class="sr-only">Broker: </span><SearchHighlight
 								text={item.broker_name}
 								query={hubQuery}
 							/>
 						</span>
 					</span>
-					<span class="hub-open"><span class="sr-only">View hub</span><CaretLeft properties="size-4 rotate-180" /></span>
+					<span class="hub-open"
+						><span class="sr-only">View hub</span><CaretLeft properties="size-4 rotate-180" /></span
+					>
 				</span>
 			</a>
 		{:else}
@@ -276,7 +289,10 @@
 				<h3>
 					<TreeView properties="size-4" />Network <span class="count-pill">{hubNodes.length}</span>
 				</h3>
-				<label class="node-search"><span class="sr-only">Search nodes</span><span class="search-icon" aria-hidden="true"><MagnifyingGlass properties="size-4" /></span><Search
+				<label class="node-search"
+					><span class="sr-only">Search nodes</span><span class="search-icon" aria-hidden="true"
+						><MagnifyingGlass properties="size-4" /></span
+					><Search
 						placeholder="Search…"
 						aria-label="Search nodes"
 						bind:value={search}
@@ -300,12 +316,15 @@
 						aria-controls="node-inspector"
 						onclick={selectHub}
 					>
-						<span class="core-heading"><span class="core-icon" aria-hidden="true"><TreeView properties="size-5" /></span><span class="device-kind">Hub</span>
-							<span class="core-status"><span
+						<span class="core-heading"
+							><span class="core-icon" aria-hidden="true"><TreeView properties="size-5" /></span
+							><span class="device-kind">Hub</span>
+							<span class="core-status"
+								><span
 									class="status-dot"
 									class:online={['online', 'connected'].includes(hub.connection_state)}
-							>
-									</span>{hub.connection_state}
+								>
+								</span>{hub.connection_state}
 							</span>
 						</span>
 						<span class="core-identity"><strong>{hub.name}</strong><code>{hub.hub_id}</code></span>
@@ -330,23 +349,32 @@
 										aria-label={`${item.pc_id || 'Chair node'}, ${item.mac_address}${matchingNodes.has(item.id) ? ', search match' : ''}`}
 										onclick={() => selectNode(item.id)}
 									>
-										<span class="node-heading"><span class="node-symbol" aria-hidden="true"><Devices properties="size-4" /></span><span>{item.pc_id || 'Chair node'}</span>{#if nodeId === item.id}<span
+										<span class="node-heading"
+											><span class="node-symbol" aria-hidden="true"
+												><Devices properties="size-4" /></span
+											><span>{item.pc_id || 'Chair node'}</span>{#if nodeId === item.id}<span
 													class="selected-indicator"
 													aria-hidden="true"
-										>
-												<Check properties="size-3" />
-										</span>{/if}
+												>
+													<Check properties="size-3" />
+												</span>{/if}
 										</span>
-										<span class="node-meta"><span class="pair-state" class:paired={item.paired}><span class="pair-dot" aria-hidden="true"></span>{item.paired
+										<span class="node-meta"
+											><span class="pair-state" class:paired={item.paired}
+												><span class="pair-dot" aria-hidden="true"></span>{item.paired
 													? 'Paired'
 													: 'Unpaired'}
-										</span><span class="occupancy-state" class:occupied={item.occupancy === 'occupied'}>{item.occupancy || 'Unknown'}</span>
+											</span><span
+												class="occupancy-state"
+												class:occupied={item.occupancy === 'occupied'}
+												>{item.occupancy || 'Unknown'}</span
+											>
 										</span>
 									</button>
 									<div class="node-mac mac-address">
-										<code>{#if highlightLength}<mark>{item.mac_address.slice(0, highlightLength)}</mark>{item.mac_address.slice(
-													highlightLength
-												)}{:else}{item.mac_address}{/if}
+										<code
+											>{#if highlightLength}<mark>{item.mac_address.slice(0, highlightLength)}</mark
+												>{item.mac_address.slice(highlightLength)}{:else}{item.mac_address}{/if}
 										</code>
 										<button
 											type="button"
@@ -479,7 +507,9 @@
 												}))}
 										/>
 									</div>
-									<button disabled={busy || !node.paired || !hubClients.some((c) => !c.node_id)}>Save mapping</button>
+									<button disabled={busy || !node.paired || !hubClients.some((c) => !c.node_id)}
+										>Save mapping</button
+									>
 								</form>
 								{#if !node.paired}<p class="muted">
 										Pair this Chair Node before mapping a PC.
@@ -519,7 +549,9 @@
 											required
 										/>
 									</div>
-									<button disabled={busy || client.credential_status !== 'admin_confirmed'}>{busy ? 'Sending...' : 'Queue command'}</button>
+									<button disabled={busy || client.credential_status !== 'admin_confirmed'}
+										>{busy ? 'Sending...' : 'Queue command'}</button
+									>
 								</form>
 								{#if client.credential_status !== 'admin_confirmed'}<p class="muted">
 										Confirm this Client's external provisioning under Clients to enable commands.
@@ -545,6 +577,14 @@
 											toasterId
 										)}
 								/>
+								{#if node.paired}<DeleteAction
+										label="Force unpair"
+										title={`Force unpair ${node.mac_address}?`}
+										message="This clears the Node's pairing and workstation mapping in KAGE without waiting for Hub confirmation. A physical Hub may still remember the Node. Reset or re-pair the physical devices before using it again."
+										disabled={busy}
+										onconfirm={(toasterId) =>
+											onaction('nodes', { action: 'force_unpair', id: node.id }, toasterId)}
+									/>{/if}
 								<button type="button" class="secondary" onclick={onpairing}>Manage pairing</button>
 							</div>
 						</div>
@@ -566,7 +606,9 @@
 			{:else}
 				<div class="panel-header inspector-header">
 					<h3><TreeView properties="size-4" />Hub details</h3>
-					<span class="badge" class:online={['online', 'connected'].includes(hub.connection_state)}>{hub.connection_state}</span>
+					<span class="badge" class:online={['online', 'connected'].includes(hub.connection_state)}
+						>{hub.connection_state}</span
+					>
 				</div>
 				<div class="inspector-body" bind:this={inspector}>
 					<div class="node-identity">
@@ -597,11 +639,12 @@
 					<div class="inspector-section">
 						<h3>Workstations</h3>
 						<div class="hub-workstation-total">
-							<Devices properties="size-5" /><strong>{hubClients.length}</strong><span>{hubClients.length === 1 ? 'workstation' : 'workstations'}
-							</span>
+							<Devices properties="size-5" />
+							<span>{hubClients.length === 1 ? 'workstation' : 'workstations'}</span>
+							<strong>{hubClients.length}</strong>
 						</div>
 					</div>
-					<div class="inspector-section">
+					<div class="settings-toggle">
 						<div class="details-actions">
 							<button
 								type="button"
@@ -621,23 +664,6 @@
 						aria-label="Hub settings"
 					>
 						<h3>Hub settings</h3>
-						<details class="provisioning-details">
-							<summary>Provisioning details</summary>
-							<dl class="settings-facts">
-								<div>
-									<dt>Provisioning</dt>
-									<dd>
-										{hub.credential_status === 'admin_confirmed'
-											? 'Confirmed'
-											: hub.credential_status.replaceAll('_', ' ')}
-									</dd>
-								</div>
-								<div>
-									<dt>MQTT username</dt>
-									<dd><code>{hub.username}</code></dd>
-								</div>
-							</dl>
-						</details>
 						<div class="settings-actions">
 							<button
 								type="button"
@@ -664,14 +690,47 @@
 									onaction('hubs', { action: 'revoke', id: hub.id }, toasterId)}
 							/>
 							<DeleteAction
-								label="Delete hub"
-								title={`Delete ${hub.name} (${hub.hub_id})?`}
-								message={`This permanently removes the hub, its KAGE credentials and pairing requests. Delete its clients and unpair and delete its nodes first (${hubClients.length} clients and ${hubNodes.length} nodes remaining). Remove its MQTT account on the external broker and disconnect its sessions separately.`}
+								label="Delete hub and devices"
+								title={`Delete ${hub.name} (${hub.hub_id}) and its devices?`}
+								message={`This permanently removes the Hub, ${hubNodes.length} Node records, ${hubClients.length} Client records, their KAGE credentials, mappings and pairing requests. Active commands will be cancelled or marked unconfirmed.`}
+								secondTitle={`Final confirmation: delete ${hub.hub_id}?`}
+								secondMessage="This is a server-only removal. Physical Hubs, Nodes and Clients are not reset. Revoke their MQTT accounts on the external broker and disconnect any active sessions separately. Confirm only when you intend to remove all these KAGE records."
 								disabled={busy}
-								onconfirm={(toasterId) =>
-									onaction('hubs', { action: 'delete', id: hub.id }, toasterId)}
+								onconfirm={async (toasterId) => {
+									const deleted = await onaction(
+										'hubs',
+										{ action: 'force_delete', id: hub.id },
+										toasterId
+									);
+									if (deleted) await goto(resolve('/(app)/hubs'));
+									return deleted;
+								}}
 							/>
 						</div>
+						<details class="provisioning-details" open>
+							<summary>
+								<span class="provisioning-label"
+									><Info properties="size-4" />Provisioning details</span
+								>
+								<span class="provisioning-chevron" aria-hidden="true"
+									><CaretDown properties="size-4" /></span
+								>
+							</summary>
+							<dl class="settings-facts">
+								<div>
+									<dt>Provisioning:</dt>
+									<dd>
+										{hub.credential_status === 'admin_confirmed'
+											? 'Confirmed'
+											: hub.credential_status.replaceAll('_', ' ')}
+									</dd>
+								</div>
+								<div>
+									<dt>MQTT username:</dt>
+									<dd><code>{hub.username}</code></dd>
+								</div>
+							</dl>
+						</details>
 					</section>
 				</div>
 			{/if}
@@ -690,7 +749,7 @@
 		grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 360px));
 		gap: 18px;
 		margin-bottom: 28px;
-		margin-top: 20px;
+		margin-top: 32px;
 	}
 	.hub-card {
 		display: grid;
@@ -894,7 +953,7 @@
 	}
 	.hub-metric {
 		display: grid;
-		grid-template-columns: 24px minmax(0, 1fr);
+		grid-template-columns: 24px minmax(0, 1fr) auto;
 		column-gap: 10px;
 		align-content: center;
 		align-items: center;
@@ -906,10 +965,12 @@
 	}
 	.metric-icon {
 		display: inline-flex;
-		grid-row: span 2;
+		grid-column: 1;
 		color: var(--accent);
 	}
 	.hub-metric strong {
+		grid-column: 3;
+		text-align: right;
 		font-size: 22px;
 		font-weight: 600;
 		line-height: 1.2;
@@ -917,6 +978,8 @@
 		font-variant-numeric: tabular-nums;
 	}
 	.metric-label {
+		grid-column: 2;
+		grid-row: 1;
 		color: var(--text-secondary);
 		font-size: 11px;
 		line-height: 1.3;
@@ -1507,34 +1570,100 @@
 		font-size: 12px;
 	}
 	.hub-facts > div:not(.last-report) dd {
+		text-align: right;
 		font-size: 24px;
 		font-weight: 600;
 		line-height: 1.2;
 	}
-	.hub-workstation-total {
+	.hub-facts > div:not(.last-report) {
 		display: flex;
 		align-items: center;
+		justify-content: space-between;
+		gap: 8px;
+	}
+	.hub-workstation-total {
+		display: grid;
+		grid-template-columns: 24px minmax(0, 1fr) auto;
+		align-items: center;
 		gap: 9px;
+		padding: 12px;
+		border: 1px solid var(--line);
+		border-radius: 8px;
+		background: var(--surface-deep);
 		color: var(--muted);
 		font-size: 12px;
 	}
 	.hub-workstation-total strong {
+		text-align: right;
 		color: var(--text);
 		font-size: 20px;
 		font-weight: 600;
+		font-variant-numeric: tabular-nums;
 	}
 	.hub-settings[hidden] {
 		display: none;
 	}
+	.settings-toggle {
+		margin-top: var(--panel-spacing);
+	}
 	.provisioning-details {
 		min-width: 0;
+		margin: 8px 0 0;
+		padding: 0;
+		border: 1px solid var(--line);
+		border-radius: 10px;
+		background: var(--surface-deep);
+	}
+	.provisioning-details summary {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 16px;
+		margin-bottom: 0;
+		padding: 14px 16px;
+		list-style: none;
+		cursor: pointer;
+		font-size: 13px;
+		font-weight: 600;
+	}
+	.provisioning-details summary::-webkit-details-marker {
+		display: none;
+	}
+	.provisioning-label {
+		display: inline-flex;
+		align-items: center;
+		gap: 10px;
+	}
+	.provisioning-chevron {
+		display: inline-flex;
+		flex-shrink: 0;
+		transition: transform 180ms ease;
+	}
+	.provisioning-details[open] .provisioning-chevron {
+		transform: rotate(180deg);
 	}
 	.provisioning-details .settings-facts {
-		padding-top: 12px;
-	}
-	.settings-facts > div {
 		display: grid;
-		gap: 5px;
+		grid-template-columns: minmax(0, 1fr);
+		gap: 14px;
+		margin: 0 16px;
+		padding: 16px 0;
+		border-top: 1px solid var(--line);
+		font-size: 13px;
+	}
+	.provisioning-details .settings-facts > div {
+		display: flex;
+		align-items: baseline;
+		flex-wrap: wrap;
+		gap: 4px 8px;
+	}
+	.provisioning-details .settings-facts dt,
+	.provisioning-details .settings-facts dd {
+		font-size: 13px;
+		text-transform: none;
+	}
+	.provisioning-details .settings-facts dd {
+		color: var(--text);
 	}
 	.settings-actions {
 		display: grid;

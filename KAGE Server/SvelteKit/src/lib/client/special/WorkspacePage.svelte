@@ -70,9 +70,13 @@
 			type="button"
 			class="secondary"
 			disabled={workspace.refreshing}
-			onclick={workspace.refresh}
+			onclick={() => workspace.refresh(true)}
 		>
-			<span aria-hidden="true">{#if workspace.refreshing}<Spinner />{:else}<ArrowCounterClockwise properties="size-4" />{/if}</span>{workspace.refreshing ? 'Refreshing...' : 'Refresh'}
+			<span aria-hidden="true"
+				>{#if workspace.refreshing}<Spinner />{:else}<ArrowCounterClockwise
+						properties="size-4"
+					/>{/if}</span
+			>{workspace.refreshing ? 'Refreshing...' : 'Refresh'}
 		</button>
 		{#if registration}
 			<button
@@ -105,10 +109,7 @@
 				value={delivery.token}
 			/>
 		</div>
-		<button
-			type="button"
-			onclick={() => delete workspace.deliveries[page.url.pathname]}
-		>
+		<button type="button" onclick={() => delete workspace.deliveries[page.url.pathname]}>
 			I have saved these credentials
 		</button>
 	</section>

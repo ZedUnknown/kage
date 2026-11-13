@@ -8,7 +8,8 @@ node_modules/
 passwd
 .env
 .env.*
-!**/.env.docker.example
+!**/.env.example
+!**/.gitattributes
 secrets.*
 credentials.*
 */Tests/

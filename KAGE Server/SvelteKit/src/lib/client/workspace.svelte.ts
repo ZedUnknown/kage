@@ -14,6 +14,7 @@ export class Workspace {
 	busy = $state(false);
 	disconnected = $state(false);
 	refreshing = $state(false);
+	foregroundLoading = $state(false);
 	deliveries = $state<Record<string, { username: string; token: string } | undefined>>({});
 	mobileOpen = $state(false);
 	isMobile = $state(false);
@@ -36,12 +37,18 @@ export class Workspace {
 		this.account = data.account;
 	}
 
-	refresh = () => {
-		if (this.pendingRefresh) return this.pendingRefresh;
+	refresh = (foreground = false) => {
+		if (foreground) this.foregroundLoading = true;
+		if (this.pendingRefresh) {
+			return foreground
+				? this.pendingRefresh.finally(() => (this.foregroundLoading = false))
+				: this.pendingRefresh;
+		}
 
 		this.refreshing = true;
 		this.pendingRefresh = this.fetchDashboard().finally(() => {
 			this.refreshing = false;
+			this.foregroundLoading = false;
 			this.pendingRefresh = undefined;
 		});
 

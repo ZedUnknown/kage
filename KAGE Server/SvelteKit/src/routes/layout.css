@@ -124,17 +124,17 @@ button.danger {
 button.link-button,
 .button.link-button {
 	min-height: 36px;
-	padding: 8px 0;
+	padding: 10px 0;
 	border: 0;
 	background: none;
-	color: var(--text-secondary);
+	color: var(--action);
 	font-weight: 500;
 	justify-content: flex-start;
 }
 button.link-button:hover:not(:disabled),
 .button.link-button:hover {
 	background: none;
-	color: var(--accent-soft);
+	text-decoration: underline;
 }
 button.icon-button {
 	width: 36px;

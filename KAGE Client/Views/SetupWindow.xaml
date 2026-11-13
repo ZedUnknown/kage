@@ -477,6 +477,20 @@
                                         <TextBlock Text="01 / INITIALIZE CONNECTION" Style="{StaticResource TechnicalLabel}" Foreground="{StaticResource SetupRed}"/>
                                         <TextBlock Text="Connect to KAGE" Style="{StaticResource PageTitle}"/>
                                         <TextBlock Text="Use this PC’s Client credentials to connect and retrieve its assigned Hub and PC from KAGE." Style="{StaticResource PageDescription}" />
+                                        <Border Background="#251619" BorderBrush="{StaticResource SetupRed}" BorderThickness="1" Padding="16,10" Margin="0,0,0,18" ClipToBounds="True">
+                                            <StackPanel>
+                                                <TextBlock Text="[ IMPORTANT ]" FontFamily="{StaticResource ArameFont}" Foreground="{StaticResource SetupRed}" FontSize="12"/>
+                                                <Canvas x:Name="RegistrationNoticeViewport" Height="28" Margin="0,4,0,0" ClipToBounds="True" Loaded="RegistrationNoticeViewport_Loaded" SizeChanged="RegistrationNoticeViewport_SizeChanged">
+                                                    <StackPanel x:Name="RegistrationNoticeTrack" Orientation="Horizontal" Canvas.Top="3">
+                                                        <StackPanel.RenderTransform><TranslateTransform/></StackPanel.RenderTransform>
+                                                        <StackPanel x:Name="RegistrationNoticeSegment" Orientation="Horizontal">
+                                                            <TextBlock x:Name="RegistrationNoticeText" Text="This PC's MQTT username and token must be added under Clients in KAGE Admin before you enter them here." Foreground="#F4F2F0" FontSize="13" TextWrapping="NoWrap" VerticalAlignment="Center"/>
+                                                            <Border x:Name="RegistrationNoticeSeparator" Width="1.5" Height="22" Background="{StaticResource SetupRed}" Margin="20,0" VerticalAlignment="Center"/>
+                                                        </StackPanel>
+                                                    </StackPanel>
+                                                </Canvas>
+                                            </StackPanel>
+                                        </Border>
                                         <Border Background="#151517" BorderBrush="{StaticResource SetupLine}" BorderThickness="1">
                                             <Grid>
                                                 <Border Height="3" Width="68" Background="{StaticResource SetupRed}" HorizontalAlignment="Left" VerticalAlignment="Top"/>

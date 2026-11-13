@@ -50,7 +50,7 @@
 	}
 </script>
 
-<svelte:head><title>KAGE - {title}</title></svelte:head>
+<svelte:head><title>KAGE | {title}</title></svelte:head>
 <header class="page-header">
 	<div class="page-heading">
 		<button

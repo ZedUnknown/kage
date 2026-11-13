@@ -1,5 +1,6 @@
 .*
 !.gitignore
+!**/.dockerignore
 obj/
 bin/
 node_modules/
@@ -7,6 +8,7 @@ node_modules/
 passwd
 .env
 .env.*
+!**/.env.docker.example
 secrets.*
 credentials.*
 */Tests/

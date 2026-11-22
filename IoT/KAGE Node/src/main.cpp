@@ -206,6 +206,7 @@ void sendTestPacketRequest(uint8_t channel) {
 void triggerOccupancy(bool occupied) {
     if (!occupancyKnown || currentOccupancy != occupied) {
         occupancyPending = true;
+        blinkLED(1); // indicate occupancy change
         // avoid waiting for the next heartbeat if the occupancy state has changed
         occupancyAttempted = false;
     }
@@ -635,8 +636,12 @@ void startNode(String _HubMacAddress, String _HubWiFiChannel) {
 };
 
 // ==========[PINS]==========
-uint8_t ledPin = 7; // Pin for the LED
+uint8_t ledPin = 6; // Pin for the LED
 uint8_t buttonPin = 8; // Pin for the button
+uint8_t fsrPin = 4; // Pin for the Force Sensitive Resistor (FSR)
+
+// ===========[Variables]==========
+int fsrThreshold = 300; // Threshold for determining occupancy from FSR readings
 
 // ===========[SETUP]==========
 void setup() {
@@ -658,6 +663,7 @@ void setup() {
 
     // [Register Pin Modes]
     pinMode(buttonPin, INPUT_PULLUP);
+    pinMode(fsrPin, INPUT);
 
     // [TESTING ONLY]
     // clearPairedHub();
@@ -778,6 +784,11 @@ void loop() {
     }
 
     setBackgroundLED(!isPaired && !isPendingRequest);
+
+    // [Handle FSR Sensor]
+    int fsrValue = analogRead(fsrPin);
+    bool isOccupied = fsrValue > fsrThreshold; // Adjust threshold as needed
+    triggerOccupancy(isOccupied);
 
     delay(100); // to save power
 }

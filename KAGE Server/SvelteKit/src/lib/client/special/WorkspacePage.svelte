@@ -70,7 +70,7 @@
 			type="button"
 			class="secondary"
 			disabled={workspace.refreshing}
-			onclick={() => workspace.refresh(true)}
+			onclick={workspace.refresh}
 		>
 			<span aria-hidden="true"
 				>{#if workspace.refreshing}<Spinner />{:else}<ArrowCounterClockwise

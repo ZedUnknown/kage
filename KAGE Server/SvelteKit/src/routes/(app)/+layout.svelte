@@ -180,7 +180,7 @@
 	</aside>
 	<main class="workspace" inert={workspace.isMobile && workspace.mobileOpen}>
 		<PullToRefresh
-			onRefresh={() => workspace.refresh(true)}
+			onRefresh={workspace.refresh}
 			disabled={!workspace.isMobile || workspace.mobileOpen || workspace.busy}
 		>
 			{@render children()}
@@ -188,7 +188,7 @@
 	</main>
 </div>
 {/if}
-{#if !sidebarReady || initialLoading || navigationLoading || workspace.busy || workspace.foregroundLoading}
+{#if !sidebarReady || initialLoading || navigationLoading}
 	<div class="logo-loading" role="status" aria-label="Loading">
 		<LogoLoader onFirstRevealComplete={initialLoading ? () => (initialLoading = false) : undefined} />
 	</div>

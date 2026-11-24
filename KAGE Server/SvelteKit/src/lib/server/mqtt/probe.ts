@@ -246,7 +246,9 @@ export async function probeBroker(options: IClientOptions, device: ProbeDevice) 
 			);
 
 			if (!denied) {
-				throw new InputError('ACL test failed: the device can publish into another device namespace.');
+			throw new InputError(
+				`ACL test failed for Client ${device.username}. The broker allowed it to publish into another device namespace. Limit this Client to its assigned topics and deny unmatched publishes.`
+			);
 			}
 		}
 

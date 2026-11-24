@@ -22,7 +22,8 @@ export const handle: Handle = async ({ event, resolve }) => {
 	}
 
 	event.locals.account = await accountForSession(event.cookies.get('kage_session'));
-	const publicPath = pathname === '/auth' || pathname.startsWith('/api/auth/');
+	const publicPath = pathname === '/auth' || pathname.startsWith('/api/auth/') ||
+		/^\/(?:api\/)?(?:device-setup|provisioning)\/[0-9a-f-]{36}$/.test(pathname);
 
 	if (!publicPath && !event.locals.account) {
 		if (pathname.startsWith('/api/')) {

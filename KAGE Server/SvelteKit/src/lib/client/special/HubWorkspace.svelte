@@ -4,6 +4,8 @@
 	import { cubicOut } from 'svelte/easing';
 	import { prefersReducedMotion } from 'svelte/motion';
 	import PanelSearch from '../components/common/PanelSearch.svelte';
+	import ProvisioningPortal from '../components/common/ProvisioningPortal.svelte';
+	import { getWorkspace } from '../workspace.svelte.ts';
 	import ConnectionFilters from '../components/common/ConnectionFilters.svelte';
 	import { connectionStatus, type ConnectionFilter } from '../connection-status.ts';
 	import SearchHighlight from '../components/common/SearchHighlight.svelte';
@@ -24,8 +26,8 @@
 	import ConfirmationAction from '../components/common/ConfirmationAction.svelte';
 	import NetworkViewport from '../components/common/NetworkViewport.svelte';
 	import Check from '../components/icons/Check.svelte';
-	import Info from '../components/icons/Info.svelte';
-	import CaretDown from '../components/icons/CaretDown.svelte';
+	import InformationSummary from '../components/common/InformationSummary.svelte';
+	import StatusDot from '../components/common/StatusDot.svelte';
 
 	interface Hub {
 		id: string;
@@ -70,6 +72,7 @@
 		report?: { reason?: string };
 	}
 
+	const workspace = getWorkspace();
 	let {
 		hubs,
 		nodes,
@@ -220,13 +223,8 @@
 					<strong class="hub-name" title={item.name}
 						><SearchHighlight text={item.name} query={hubQuery} /></strong
 					>
-					<span class="hub-state-badge">
-						<span
-							class="connection-dot"
-							class:online={connectionStatus(item.connection_state) === 'online'}
-							aria-hidden="true"
-						>
-						</span>
+					<span class="hub-state-badge" class:online={connectionStatus(item.connection_state) === 'online'}>
+						<StatusDot />
 						<span class="hub-status">{item.connection_state || 'Unknown'}</span>
 					</span>
 				</span>
@@ -319,12 +317,8 @@
 						<span class="core-heading"
 							><span class="core-icon" aria-hidden="true"><TreeView properties="size-5" /></span
 							><span class="device-kind">Hub</span>
-							<span class="core-status"
-								><span
-									class="status-dot"
-									class:online={['online', 'connected'].includes(hub.connection_state)}
-								>
-								</span>{hub.connection_state}
+							<span class="core-status" class:online={['online', 'connected'].includes(hub.connection_state)}>
+								<StatusDot />{hub.connection_state}
 							</span>
 						</span>
 						<span class="core-identity"><strong>{hub.name}</strong><code>{hub.hub_id}</code></span>
@@ -361,7 +355,7 @@
 										</span>
 										<span class="node-meta"
 											><span class="pair-state" class:paired={item.paired}
-												><span class="pair-dot" aria-hidden="true"></span>{item.paired
+												><StatusDot />{item.paired
 													? 'Paired'
 													: 'Unpaired'}
 											</span><span
@@ -568,7 +562,7 @@
 									title={`${node.paired ? 'Unpair' : 'Delete'} ${node.mac_address}?`}
 									message={node.paired
 										? 'This creates an unpair request. Approve it in Pairing, then wait for hub confirmation. Confirmation removes the PC to Chair Node mapping. You can delete the saved node record after unpairing completes.'
-										: 'This permanently removes the unpaired node record and its pairing requests from KAGE. It will need to pair again to rejoin the network.'}
+								: 'This permanently removes the node record and its pairing requests from KAGE.'}
 									disabled={busy}
 									onconfirm={(toasterId) =>
 										onaction(
@@ -580,7 +574,7 @@
 								{#if node.paired}<DeleteAction
 										label="Force unpair"
 										title={`Force unpair ${node.mac_address}?`}
-										message="This clears the Node's pairing and workstation mapping in KAGE without waiting for Hub confirmation. A physical Hub may still remember the Node. Reset or re-pair the physical devices before using it again."
+								message="This clears the Node's pairing and workstation mapping in KAGE. If the Hub still has the pairing saved, you can review and restore it from Pairing."
 										disabled={busy}
 										onconfirm={(toasterId) =>
 											onaction('nodes', { action: 'force_unpair', id: node.id }, toasterId)}
@@ -655,6 +649,9 @@
 							>
 								{settingsOpen ? 'Hide hub settings' : 'Show hub settings'}
 							</button>
+							{#if workspace?.account.role === 'admin'}
+								<ProvisioningPortal hubId={hub.id} />
+							{/if}
 						</div>
 					</div>
 					<section
@@ -665,13 +662,15 @@
 					>
 						<h3>Hub settings</h3>
 						<div class="settings-actions">
-							<button
-								type="button"
-								disabled={busy || hub.credential_status === 'admin_confirmed'}
-								onclick={() => onaction('hubs', { action: 'confirm', id: hub.id })}
-							>
-								Confirm provisioning
-							</button>
+							{#if hub.credential_status !== 'admin_confirmed'}
+								<button
+									type="button"
+									disabled={busy}
+									onclick={() => onaction('hubs', { action: 'confirm', id: hub.id })}
+								>
+									Confirm provisioning
+								</button>
+							{/if}
 							<ConfirmationAction
 								label="Rotate token"
 								title={`Rotate token for ${hub.name} (${hub.hub_id})?`}
@@ -708,14 +707,7 @@
 							/>
 						</div>
 						<details class="provisioning-details" open>
-							<summary>
-								<span class="provisioning-label"
-									><Info properties="size-4" />Provisioning details</span
-								>
-								<span class="provisioning-chevron" aria-hidden="true"
-									><CaretDown properties="size-4" /></span
-								>
-							</summary>
+							<InformationSummary label="Provisioning details" />
 							<dl class="settings-facts">
 								<div>
 									<dt>Provisioning:</dt>
@@ -916,6 +908,8 @@
 		white-space: nowrap;
 	}
 	.hub-state-badge {
+		--status-dot-size: 8px;
+		--status-dot-shadow: 0 1px 1px #00000026, 0 0 0 2px #ffffff12;
 		display: inline-flex;
 		align-items: center;
 		flex-shrink: 0;
@@ -931,18 +925,8 @@
 		font-size: 11px;
 		font-weight: 500;
 	}
-	.connection-dot {
-		width: 8px;
-		height: 8px;
-		flex-shrink: 0;
-		border-radius: 50%;
-		background: currentColor;
-		box-shadow:
-			0 1px 1px #00000026,
-			0 0 0 2px #ffffff12;
-	}
-	.connection-dot.online {
-		background: var(--success);
+	.hub-state-badge.online {
+		--status-dot-color: var(--success);
 	}
 	.hub-metrics {
 		display: grid;
@@ -1160,6 +1144,7 @@
 		overflow-wrap: anywhere;
 	}
 	.core-status {
+		--status-dot-color: var(--muted);
 		display: flex;
 		align-items: center;
 		gap: 6px;
@@ -1170,15 +1155,9 @@
 		font-weight: 400;
 		text-transform: capitalize;
 	}
-	.status-dot {
-		display: block;
-		width: 7px;
-		height: 7px;
-		background: var(--muted);
-	}
-	.status-dot.online {
-		background: var(--success);
-		box-shadow: 0 0 0 3px var(--success-surface);
+	.core-status.online {
+		--status-dot-color: var(--success);
+		--status-dot-shadow: 0 0 0 3px var(--success-surface);
 	}
 	.network-nodes {
 		position: relative;
@@ -1332,18 +1311,14 @@
 		text-transform: capitalize;
 	}
 	.pair-state {
+		--status-dot-size: 5px;
+		--status-dot-color: var(--muted);
 		display: inline-flex;
 		align-items: center;
 		gap: 5px;
 	}
-	.pair-dot {
-		width: 5px;
-		height: 5px;
-		border-radius: 50%;
-		background: var(--muted);
-	}
-	.pair-state.paired .pair-dot {
-		background: var(--success);
+	.pair-state.paired {
+		--status-dot-color: var(--success);
 	}
 	.occupancy-state {
 		padding: 1px 6px;
@@ -1606,6 +1581,9 @@
 	.settings-toggle {
 		margin-top: var(--panel-spacing);
 	}
+	.settings-toggle .details-actions {
+		justify-content: flex-end;
+	}
 	.provisioning-details {
 		min-width: 0;
 		margin: 8px 0 0;
@@ -1613,34 +1591,6 @@
 		border: 1px solid var(--line);
 		border-radius: 10px;
 		background: var(--surface-deep);
-	}
-	.provisioning-details summary {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 16px;
-		margin-bottom: 0;
-		padding: 14px 16px;
-		list-style: none;
-		cursor: pointer;
-		font-size: 13px;
-		font-weight: 600;
-	}
-	.provisioning-details summary::-webkit-details-marker {
-		display: none;
-	}
-	.provisioning-label {
-		display: inline-flex;
-		align-items: center;
-		gap: 10px;
-	}
-	.provisioning-chevron {
-		display: inline-flex;
-		flex-shrink: 0;
-		transition: transform 180ms ease;
-	}
-	.provisioning-details[open] .provisioning-chevron {
-		transform: rotate(180deg);
 	}
 	.provisioning-details .settings-facts {
 		display: grid;

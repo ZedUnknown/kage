@@ -1,6 +1,8 @@
 <script lang="ts">
 	import WorkspacePage from '#lib/client/special/WorkspacePage.svelte';
 	import EventActivityChart from '#lib/client/components/EventActivityChart.svelte';
+	import StatusDot from '#lib/client/components/common/StatusDot.svelte';
+	import DeviceGlyph from '#lib/client/components/icons/DeviceGlyph.svelte';
 	import { getWorkspace } from '#lib/client/workspace.svelte.ts';
 	import { date } from '#lib/client/format.ts';
 	import { resolve } from '$app/paths';
@@ -149,41 +151,7 @@
 	}
 </script>
 
-{#snippet deviceIcon(kind: 'broker' | 'hub' | 'node' | 'client')}
-	<svg
-		class="device-glyph"
-		xmlns="http://www.w3.org/2000/svg"
-		width="24"
-		height="24"
-		viewBox="0 0 24 24"
-		fill="none"
-		stroke="currentColor"
-		stroke-width="1.6"
-		stroke-linecap="round"
-		stroke-linejoin="round"
-		aria-hidden="true"
-		focusable="false"
-	>
-		{#if kind === 'broker'}
-			<rect x="3" y="3" width="18" height="7" rx="2" />
-			<rect x="3" y="14" width="18" height="7" rx="2" />
-			<path d="M7 6.5h4M7 17.5h4" />
-			<circle cx="17" cy="6.5" r="0.8" fill="currentColor" stroke="none" />
-			<circle cx="17" cy="17.5" r="0.8" fill="currentColor" stroke="none" />
-		{:else if kind === 'hub'}
-			<rect x="3" y="12" width="18" height="8" rx="2" />
-			<path d="M7 12V4m10 8V4M15 16h2" />
-			<circle cx="7" cy="16" r="0.8" fill="currentColor" stroke="none" />
-			<circle cx="11" cy="16" r="0.8" fill="currentColor" stroke="none" />
-		{:else if kind === 'node'}
-			<rect x="7" y="2" width="10" height="8" rx="2" />
-			<path d="M6 10v5h12v-5M8 15v7m8-7v7M6 11H3v4h3m12-4h3v4h-3" />
-		{:else}
-			<rect x="3" y="3" width="18" height="13" rx="2" />
-			<path d="M3 12h18M12 16v5m-4 0h8" />
-		{/if}
-	</svg>
-{/snippet}
+
 
 <WorkspacePage
 	title="Dashboard"
@@ -199,9 +167,11 @@
 						<strong class="metric-value">{metric.count}</strong>
 						<h3>{metric.label}</h3>
 					</div>
-					<span class="metric-icon">{@render deviceIcon(metric.kind)}</span>
+					<span class="metric-icon">
+						<DeviceGlyph kind={metric.kind} properties="device-glyph" />
+					</span>
 					<div class="metric-breakdown">
-						<span class="metric-active"><span class="status-dot" aria-hidden="true"></span><b>{metric.active}</b>
+						<span class="metric-active"><StatusDot /><b>{metric.active}</b>
 							{metric.activeLabel}
 						</span>
 						<span>{metric.count - metric.active} {metric.inactiveLabel}</span>
@@ -232,7 +202,7 @@
 												'Device operation'}
 										</span><time datetime={new Date(command.created_at).toISOString()}>{date(command.created_at)}</time>
 									</div>
-									<span class="command-status" data-tone={statusTone(command.status)}><span class="status-dot" aria-hidden="true"></span>{command.status.replaceAll(
+									<span class="command-status" data-tone={statusTone(command.status)}><StatusDot />{command.status.replaceAll(
 											'_',
 											' '
 										)}
@@ -361,9 +331,6 @@
 		display: grid;
 		gap: 20px;
 	}
-	.status-dot {
-		flex-shrink: 0;
-	}
 	.metric-grid {
 		display: grid;
 		grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -414,11 +381,6 @@
 		background: color-mix(in srgb, #fff 2%, var(--surface));
 		color: #fff;
 	}
-	.device-glyph {
-		display: block;
-		width: 24px;
-		height: 24px;
-	}
 	.metric-value {
 		font-weight: 600;
 		font-variant-numeric: tabular-nums;
@@ -434,19 +396,17 @@
 		font-size: 11px;
 	}
 	.metric-active {
+		--status-dot-color: var(--text);
 		display: inline-flex;
 		align-items: center;
 		gap: 5px;
 		color: var(--text-secondary);
 	}
-	.metric-active .status-dot {
-		color: var(--text);
+	.metric-card[data-state='healthy'] .metric-active {
+		--status-dot-color: var(--success);
 	}
-	.metric-card[data-state='healthy'] .status-dot {
-		color: var(--success);
-	}
-	.metric-card[data-state='attention'] .status-dot {
-		color: var(--warning);
+	.metric-card[data-state='attention'] .metric-active {
+		--status-dot-color: var(--warning);
 	}
 	.metric-active b {
 		font-weight: 600;
@@ -571,6 +531,7 @@
 		font-size: 11px;
 	}
 	.command-status {
+		--status-dot-size: 4px;
 		display: inline-flex;
 		align-items: center;
 		gap: 6px;
@@ -597,10 +558,6 @@
 		color: var(--warning);
 		background: var(--warning-surface);
 		border-color: var(--warning-border);
-	}
-	.command-status .status-dot {
-		width: 4px;
-		height: 4px;
 	}
 	.activity-empty {
 		flex: 1;

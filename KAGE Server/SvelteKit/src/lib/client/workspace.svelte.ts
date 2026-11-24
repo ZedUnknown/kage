@@ -105,7 +105,7 @@ export function getWorkspace(): Workspace {
 }
 
 export function createPageActions(workspace = getWorkspace()) {
-	async function action(resource: string, body: object, errorToasterId?: string) {
+	async function action(resource: string, body: object, errorToasterId?: string, successToasterId?: string) {
 		if (workspace.busy) return false;
 
 		const deliveryPath = page.url.pathname;
@@ -125,7 +125,10 @@ export function createPageActions(workspace = getWorkspace()) {
 				workspace.deliveries[deliveryPath] = { username: result.username, token: result.token };
 			}
 
-			toast.success(result.message || 'Saved.');
+			if (successToasterId) {
+				toast.success(result.message || 'Saved.');
+			}
+
 			// Finish any earlier snapshot before fetching the saved state.
 			if (workspace.refreshing) await workspace.refresh();
 

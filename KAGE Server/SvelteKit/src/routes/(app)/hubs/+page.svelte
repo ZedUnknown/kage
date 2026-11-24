@@ -2,6 +2,7 @@
 	import WorkspacePage from '#lib/client/special/WorkspacePage.svelte';
 	import { getWorkspace, createPageActions } from '#lib/client/workspace.svelte.ts';
 	import HubWorkspace from '#lib/client/special/HubWorkspace.svelte';
+	import EmptyState from '#lib/client/components/common/EmptyState.svelte';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 
@@ -30,17 +31,13 @@
 			/>
 		{/if}
 		{#if !overview.hubs.length}
-			<div class="empty empty-state">
+			<EmptyState
+				actionLabel="Register your first hub"
+				disabled={actions.busy}
+				onAction={openRegistration}
+			>
 				<p>No hubs registered. Register a hub to get started.</p>
-				<button
-					type="button"
-					disabled={actions.busy}
-					aria-haspopup="dialog"
-					onclick={openRegistration}
-				>
-					Register your first hub
-				</button>
-			</div>
+			</EmptyState>
 		{/if}
 	{/snippet}
 </WorkspacePage>

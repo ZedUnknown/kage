@@ -4,6 +4,7 @@
 	import PolicyCard from '#lib/client/special/PolicyCard.svelte';
 	import { getWorkspace, createPageActions } from '#lib/client/workspace.svelte.ts';
 	import DropDown from '#lib/client/components/common/DropDown.svelte';
+	import CheckBox from '#lib/client/components/common/CheckBox.svelte';
 
 	const workspace = getWorkspace();
 	const policy = $derived(workspace.overview.policies[0] ?? {});
@@ -164,15 +165,15 @@
 					]}
 				/>
 			</div>
-			<label class="checkbox-field full-width">
-				<input
-					type="checkbox"
+			<div class="full-width">
+				<CheckBox
 					name="allow_recovery_code"
 					bind:checked={draft.allow_recovery_code}
 					disabled={locked}
-				/>
-				Allow recovery code
-			</label>
+				>
+					Allow recovery code
+				</CheckBox>
+			</div>
 		{/snippet}
 	</PolicyCard>
 {/snippet}

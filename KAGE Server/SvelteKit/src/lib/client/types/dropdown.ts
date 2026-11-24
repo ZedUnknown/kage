@@ -15,5 +15,6 @@ export type DropdownProps = {
 	required?: boolean;
 	disabled?: boolean;
 	loading?: boolean;
+	controlled?: boolean;
 	onchange?: (value: string, item: DropdownItem | undefined) => void;
 };

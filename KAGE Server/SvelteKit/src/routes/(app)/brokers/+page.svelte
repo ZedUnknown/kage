@@ -8,10 +8,13 @@
 	import DeleteAction from '#lib/client/components/common/DeleteAction.svelte';
 	import Copy from '#lib/client/components/icons/Copy.svelte';
 	import DownloadSimple from '#lib/client/components/icons/DownloadSimple.svelte';
+	import BrokerExport from '#lib/client/components/common/BrokerExport.svelte';
 	import HardDrives from '#lib/client/components/icons/HardDrives.svelte';
-	import Info from '#lib/client/components/icons/Info.svelte';
+	import InformationSummary from '#lib/client/components/common/InformationSummary.svelte';
+	import CloseButton from '#lib/client/components/common/CloseButton.svelte';
 	import Gear from '#lib/client/components/icons/Gear.svelte';
-	import CaretDown from '#lib/client/components/icons/CaretDown.svelte';
+	import Info from '#lib/client/components/icons/Info.svelte';
+	import EmptyState from '#lib/client/components/common/EmptyState.svelte';
 	import { tick } from 'svelte';
 	import { toast } from 'svelte-sonner';
 
@@ -20,6 +23,7 @@
 	const actions = createPageActions(workspace);
 	const { action } = actions;
 	let testingBroker = $state<string | null>(null);
+	const brokerControlsBusy = $derived(workspace.busy || workspace.refreshing || testingBroker !== null);
 	let testingKind = $state<'test_connection' | 'test_acl'>('test_connection');
 	let editingBroker = $state<string | null>(null);
 	const statusLabels: Record<string, string> = {
@@ -65,6 +69,8 @@
 	}
 
 	async function testBroker(id: string, kind: 'test_connection' | 'test_acl') {
+		if (brokerControlsBusy) return;
+
 		testingBroker = id;
 		testingKind = kind;
 
@@ -90,11 +96,12 @@
 
 <WorkspacePage
 	title="Brokers"
-	description="Connect a customer-owned broker. KAGE does not create MQTT accounts on it."
+	description="Connect your MQTT broker and export credentials for bulk import."
 	registration="brokers"
 	{actions}
 >
 	{#snippet children(openRegistration)}
+		<div class="broker-grid">
 		{#each overview.brokers as broker (broker.id)}
 			{@const status = broker.enabled ? broker.connection_state : 'disabled'}
 			{@const hasDevice = [...overview.hubs, ...overview.clients].some(
@@ -107,44 +114,30 @@
 			>
 				<header class="broker-header">
 					<div class="broker-heading">
-						<span class="broker-icon" aria-hidden="true"><HardDrives properties="size-6" /></span>
-						<div class="broker-title">
-							<h2>{broker.name}</h2>
-							<span
-								class="broker-status"
-								data-state={status}
-								role="status"
-								aria-label={`Broker status: ${statusLabel(status)}`}
-								title={status === 'pending'
-									? 'Waiting for the broker connection. Device permissions are checked separately.'
-									: statusLabel(status)}
-							>
-								<span class="status-dot" aria-hidden="true"></span>{statusLabel(status)}
-							</span>
-							{#if broker.enabled && !broker.acl_confirmed}
-								<span class="permission-notice">Device permissions required</span>
-							{/if}
-						</div>
+						<span class="broker-icon" data-state={status} role="img" aria-label={`Broker status: ${statusLabel(status)}`} title={statusLabel(status)}>
+							<HardDrives properties="size-7" />
+						</span>
+						<h2 class="broker-title" title={broker.name}>{broker.name}</h2>
 					</div>
 					<div class="broker-toggle">
 						<Switch
 							checked={broker.enabled}
-							disabled={actions.busy || testingBroker !== null}
+							disabled={brokerControlsBusy}
 							controlled
 							label={`${broker.enabled ? 'Disable' : 'Enable'} ${broker.name}`}
 							onchange={async () => {
+								if (brokerControlsBusy) return;
+
 								if (await action('brokers', { action: 'toggle', id: broker.id })) {
 									if (editingBroker === broker.id) editingBroker = null;
 								}
 							}}
 						/>
-						<span>{broker.enabled ? 'Enabled' : 'Disabled'}</span>
 					</div>
 				</header>
-				<div class="broker-content" inert={!broker.enabled}>
+				<div class="broker-content">
 					<details class="connection-details">
-						<summary><span class="information-label"><Info properties="size-4" />MQTT Connection Information</span><span class="information-chevron" aria-hidden="true"><CaretDown properties="size-4" /></span>
-						</summary>
+						<InformationSummary label="MQTT Connection Information" />
 						<div class="connection-information">
 							<dl>
 								<div class="connection-row">
@@ -202,134 +195,175 @@
 									<dd>{broker.acl_confirmed ? 'Passed' : 'Required before device traffic'}</dd>
 								</div>
 							</dl>
+							<div class="actions credential-actions">
+								<button
+									id={`broker-credentials-button-${broker.id}`}
+									type="button"
+									class="secondary"
+									disabled={actions.busy || testingBroker !== null || !broker.enabled}
+									aria-expanded={editingBroker === broker.id}
+									aria-controls={`broker-credentials-${broker.id}`}
+									onclick={() => editCredentials(broker.id)}
+								>
+									<span aria-hidden="true"><Gear properties="size-4" /></span>Change server credentials
+								</button>
+								<DeleteAction
+									label=""
+									title={`Delete ${broker.name}?`}
+									message={`This permanently removes the broker connection and its command history from KAGE. Events and audit history are kept. Delete its hubs first (${overview.hubs.filter((hub) => hub.broker_id === broker.id).length} remaining). Your external MQTT broker is unaffected.`}
+									disabled={actions.busy || testingBroker !== null}
+									onconfirm={(toasterId) =>
+										action('brokers', { action: 'delete', id: broker.id }, toasterId)}
+								/>
+							</div>
+							<div id={`broker-credentials-${broker.id}`}>
+								{#if editingBroker === broker.id && broker.enabled}
+									<form
+										class="credential-editor"
+										aria-labelledby={`broker-credentials-title-${broker.id}`}
+										onsubmit={(event) => saveCredentials(event, broker.id)}
+									>
+										<header class="credential-editor-header">
+											<h3 id={`broker-credentials-title-${broker.id}`}>Server credentials</h3>
+											<CloseButton
+												aria-label="Close server credentials editor"
+												disabled={actions.busy}
+												onclick={() => closeCredentials(broker.id)}
+											/>
+										</header>
+										<div class="credential-fields">
+											<label>Username<input
+													id={`broker-username-${broker.id}`}
+													name="username"
+													autocomplete="username"
+													value={broker.username || ''}
+													disabled={actions.busy}
+													required
+												/>
+											</label>
+											<div class="form-field">
+												<label for={`broker-password-${broker.id}`}>New password</label>
+												<SensitiveInput
+													id={`broker-password-${broker.id}`}
+													name="password"
+													type="password"
+													autocomplete="new-password"
+													disabled={actions.busy}
+													required
+												/>
+											</div>
+										</div>
+										<div class="actions editor-actions">
+											<button type="submit" disabled={actions.busy || !broker.enabled}>{actions.busy ? 'Saving...' : 'Save credentials'}</button>
+										</div>
+									</form>
+								{/if}
+							</div>
 						</div>
 					</details>
-					<div id={`broker-credentials-${broker.id}`}>
-						{#if editingBroker === broker.id}
-							<form
-								class="credential-editor"
-								aria-labelledby={`broker-credentials-title-${broker.id}`}
-								onsubmit={(event) => saveCredentials(event, broker.id)}
-							>
-								<h3 id={`broker-credentials-title-${broker.id}`}>Server credentials</h3>
-								<div class="credential-fields">
-									<label>Username<input
-											id={`broker-username-${broker.id}`}
-											name="username"
-											autocomplete="username"
-											value={broker.username || ''}
-											disabled={actions.busy}
-											required
-										/>
-									</label>
-									<div class="form-field">
-										<label for={`broker-password-${broker.id}`}>New password</label>
-										<SensitiveInput
-											id={`broker-password-${broker.id}`}
-											name="password"
-											type="password"
-											autocomplete="new-password"
-											disabled={actions.busy}
-											required
-										/>
-									</div>
-								</div>
-								<div class="actions editor-actions">
-									<button
-										type="button"
-										class="secondary"
-										disabled={actions.busy}
-										onclick={() => closeCredentials(broker.id)}
-									>
-										Cancel
-									</button>
-									<button type="submit" disabled={actions.busy || !broker.enabled}>{actions.busy ? 'Saving...' : 'Save credentials'}</button>
-								</div>
-							</form>
-						{/if}
-					</div>
 				</div>
 				<footer class="broker-footer">
-					<div class="actions broker-controls">
+					<div class="actions broker-controls" class:has-export={workspace.account.role === 'admin'}>
 						<button
 							type="button"
-							disabled={actions.busy || testingBroker !== null || !broker.enabled}
+							disabled={brokerControlsBusy || !broker.enabled}
+							aria-label={testingBroker === broker.id && testingKind === 'test_connection' ? 'Testing connection' : 'Test connection'}
 							title="Check the broker connection using saved server credentials. No Hub or Client needed."
 							onclick={() => testBroker(broker.id, 'test_connection')}
 						>
-							{testingBroker === broker.id && testingKind === 'test_connection'
+							<span class="broker-action-label">{testingBroker === broker.id && testingKind === 'test_connection'
 								? 'Testing connection...'
-								: 'Test connection'}
+								: 'Test connection'}</span>
+							<span class="broker-action-short" aria-hidden="true">{testingBroker === broker.id && testingKind === 'test_connection' ? 'Testing…' : 'Connection'}</span>
 						</button>
 						<button
 							type="button"
 							class="secondary"
-							disabled={actions.busy || testingBroker !== null || !broker.enabled || !hasDevice}
+							disabled={brokerControlsBusy || !broker.enabled || !hasDevice}
+							aria-label={testingBroker === broker.id && testingKind === 'test_acl' ? 'Testing permissions' : 'Test device permissions'}
 							title={hasDevice
 								? 'Test device topic delivery and access restrictions. Physical devices can be offline.'
 								: 'Register a Hub or Client and provision its broker credentials to test device permissions.'}
 							onclick={() => testBroker(broker.id, 'test_acl')}
 						>
-							{testingBroker === broker.id && testingKind === 'test_acl'
+							<span class="broker-action-label">{testingBroker === broker.id && testingKind === 'test_acl'
 								? 'Testing permissions...'
-								: 'Test device permissions'}
+								: 'Test device permissions'}</span>
+							<span class="broker-action-short" aria-hidden="true">{testingBroker === broker.id && testingKind === 'test_acl' ? 'Testing…' : 'Permissions'}</span>
 						</button>
-						<button
-							id={`broker-credentials-button-${broker.id}`}
-							type="button"
-							class="secondary"
-							disabled={actions.busy || testingBroker !== null || !broker.enabled}
-							aria-expanded={editingBroker === broker.id}
-							aria-controls={`broker-credentials-${broker.id}`}
-							onclick={() => editCredentials(broker.id)}
-						>
-							<span aria-hidden="true"><Gear properties="size-4" /></span>Change server credentials
-						</button>
+						{#if workspace.account.role === 'admin'}
+							<div class="broker-export"><BrokerExport brokerId={broker.id} brokerName={broker.name} /></div>
+						{/if}
 					</div>
-					<div class="broker-delete">
-						<DeleteAction
-							label=""
-							title={`Delete ${broker.name}?`}
-							message={`This permanently removes the broker connection and its command history from KAGE. Events and audit history are kept. Delete its hubs first (${overview.hubs.filter((hub) => hub.broker_id === broker.id).length} remaining). Your external MQTT broker is unaffected.`}
-							disabled={actions.busy || testingBroker !== null}
-							onconfirm={(toasterId) =>
-								action('brokers', { action: 'delete', id: broker.id }, toasterId)}
-						/>
-					</div>
+					{#if broker.enabled && !broker.acl_confirmed}
+						<p class="broker-notice permission-notice">
+							<Info properties="notice-icon size-4" />
+							<span>{hasDevice ? 'Test permissions' : 'No devices'}</span>
+						</p>
+					{:else if broker.enabled && status === 'connected'}
+						<!-- <p class="broker-notice permission-notice broker-ready">
+							<span class="notice-icon" aria-hidden="true"><Check properties="size-4" /></span>
+							<span>Broker ready</span>
+						</p> -->
+					{:else}
+						<p class="broker-notice permission-notice">
+							<Info properties="notice-icon size-4" />
+							<span>Broker not ready</span>
+						</p>
+					{/if}
 				</footer>
-			</section>{:else}<div class="empty empty-state">
-				<p>No brokers yet. Connect your MQTT broker to get started.</p>
-				<button
-					type="button"
+			</section>{:else}
+				<EmptyState
+					actionLabel="Add your first broker"
 					disabled={actions.busy}
-					aria-haspopup="dialog"
-					onclick={openRegistration}
+					onAction={openRegistration}
 				>
-					Add your first broker
-				</button>
-			</div>{/each}
+					<p class="broker-notice">
+						<Info properties="notice-icon size-4" />
+						Add a broker to connect your Hubs and Clients.
+					</p>
+				</EmptyState>
+			{/each}
+		</div>
 	{/snippet}
 </WorkspacePage>
 <BrokerHelp />
 
 <style>
+	.broker-grid {
+		display: grid;
+		--broker-grid-gap: 16px;
+		--broker-card-width: max(345px, calc((100% - 2 * var(--broker-grid-gap)) / 3));
+		grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--broker-card-width)), 1fr));
+		align-items: start;
+		gap: var(--broker-grid-gap);
+	}
+	:global(.broker-grid > .empty-state) {
+		grid-column: 1 / -1;
+	}
 	.broker-card {
-		padding: 22px;
+		container-type: inline-size;
+		min-width: 0;
+		margin: 0;
+		padding: 18px;
 	}
 	.broker-header {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		gap: 20px;
-		margin-bottom: 20px;
+		gap: 12px;
+		margin-bottom: 16px;
 	}
 	.broker-heading {
 		display: flex;
+		flex: 1;
 		align-items: center;
-		gap: 12px;
+		gap: 8px;
 		min-width: 0;
 	}
 	.broker-icon {
+		position: relative;
+		--broker-dot: var(--muted);
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
@@ -342,50 +376,59 @@
 		color: var(--text-secondary);
 	}
 	.broker-title {
-		display: flex;
-		align-items: center;
-		flex-wrap: wrap;
-		gap: 8px 18px;
 		min-width: 0;
-	}
-	.broker-title h2 {
-		max-width: 100%;
 		margin: 0;
+		font-size: 17px;
+		line-height: 1.25;
 		overflow-wrap: anywhere;
 	}
-	.broker-status {
+	.broker-icon[data-state='pending'] { --broker-dot: var(--warning); }
+	.broker-icon[data-state='connected'] { --broker-dot: var(--success); }
+	.broker-icon[data-state='disconnected'] { --broker-dot: var(--accent-soft); }
+	.broker-icon::before,
+	.broker-icon::after {
+		content: '';
+		position: absolute;
+		inset-block-start: 0px;
+		inset-inline-start: 0px;
+		width: 6px;
+		height: 6px;
+		border-radius: 50%;
+		pointer-events: none;
+	}
+	.broker-icon::before {
+		border: 1px solid var(--broker-dot);
+		opacity: 0;
+	}
+	.broker-icon::after {
+		background: var(--broker-dot);
+	}
+	@media (prefers-reduced-motion: no-preference) {
+		.broker-icon::before {
+			animation: broker-status-pulse 1.8s ease-out infinite;
+		}
+	}
+	@keyframes broker-status-pulse {
+		0% { opacity: 0.9; transform: scale(1); }
+		25% { opacity: 0.65; }
+		55%, 100% { opacity: 0; transform: scale(1.8); }
+	}
+	.broker-notice {
 		display: inline-flex;
 		align-items: center;
-		flex-shrink: 0;
-		gap: 6px;
-		padding: 4px 9px;
-		border: 1px solid var(--line-strong);
-		border-radius: 999px;
-		background: var(--surface-raised);
-		color: var(--muted);
-		font-size: 11px;
-		font-weight: 600;
-		line-height: 1.4;
-		white-space: nowrap;
+		gap: 5px;
+		color: color-mix(in srgb, var(--warning) 98%, var(--text-secondary));
+		font-size: 13px;
+		line-height: 1.45;
 	}
 	.permission-notice {
-		color: var(--warning);
+		flex-shrink: 0;
+		margin: 0;
 		font-size: 11px;
+		white-space: nowrap;
 	}
-	.broker-status[data-state='pending'] {
-		border-color: var(--warning-border);
-		background: var(--warning-surface);
-		color: var(--warning);
-	}
-	.broker-status[data-state='connected'] {
-		border-color: var(--success-border);
-		background: var(--success-surface);
-		color: var(--success);
-	}
-	.broker-status[data-state='disconnected'] {
-		border-color: var(--accent-border);
-		background: var(--accent-dim);
-		color: var(--accent-soft);
+	:global(.notice-icon) {
+		flex-shrink: 0;
 	}
 	.connection-details {
 		margin: 0;
@@ -394,35 +437,18 @@
 		border-radius: 10px;
 		background: var(--surface-deep);
 	}
-	.connection-details summary {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 16px;
-		margin: 0;
-		padding: 14px 16px;
-		list-style: none;
-	}
-	.connection-details summary::-webkit-details-marker {
-		display: none;
-	}
-	.information-label {
-		display: inline-flex;
-		align-items: center;
-		gap: 10px;
-	}
-	.information-chevron {
-		display: inline-flex;
-		flex-shrink: 0;
-		transition: transform 180ms ease;
-	}
-	.connection-details[open] .information-chevron {
-		transform: rotate(180deg);
-	}
 	.connection-information {
 		margin: 0 16px;
 		padding: 16px 0;
 		border-top: 1px solid var(--line);
+	}
+	.credential-actions {
+		margin-top: 16px;
+		padding-top: 16px;
+		border-top: 1px solid var(--line);
+	}
+	.credential-actions > :global(.delete-button) {
+		margin-inline-start: auto;
 	}
 	dl {
 		display: grid;
@@ -484,7 +510,7 @@
 	.broker-disabled {
 		background: var(--surface-deep);
 	}
-	.broker-disabled .broker-content {
+	.broker-disabled .connection-information > dl {
 		opacity: 0.45;
 		filter: grayscale(1);
 	}
@@ -497,21 +523,43 @@
 		font-size: 12px;
 	}
 	.broker-footer {
-		display: flex;
-		align-items: center;
-		gap: 16px;
+		display: grid;
+		justify-items: start;
+		gap: 10px;
 		margin-top: 20px;
 		padding-top: 16px;
 		border-top: 1px solid var(--line);
 	}
+	.broker-footer > .permission-notice {
+		width: 100%;
+		padding-top: 11px;
+	}
 	.broker-controls {
-		flex: 1;
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 8px;
+		width: 100%;
 		margin: 0;
 	}
-	.broker-delete {
-		flex-shrink: 0;
-		align-self: flex-end;
-		margin-left: auto;
+	.broker-controls.has-export {
+		grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 1fr);
+	}
+	.broker-controls > button,
+	.broker-export :global(.export-trigger) {
+		padding: 7px;
+		font-size: 12px;
+		white-space: nowrap;
+	}
+	.broker-action-short,
+	.broker-export :global(.export-label-short) {
+		display: none;
+	}
+	.broker-export {
+		min-width: 0;
+	}
+	.broker-export :global(.export-trigger) {
+		width: 100%;
+		height: 100%;
 	}
 	.credential-editor {
 		gap: 16px;
@@ -520,6 +568,12 @@
 		border: 1px solid var(--line);
 		border-radius: 10px;
 		background: var(--surface-deep);
+	}
+	.credential-editor-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
 	}
 	.credential-editor h3 {
 		margin: 0;
@@ -533,26 +587,19 @@
 		justify-content: flex-end;
 		margin: 0;
 	}
+	@container (max-width: 385px) {
+		.broker-action-label,
+		.broker-export :global(.export-label-full) {
+			display: none;
+		}
+		.broker-controls > button > .broker-action-short,
+		.broker-export :global(.export-label-short) {
+			display: inline;
+		}
+	}
 	@media (max-width: 480px) {
 		.broker-card {
 			padding: 16px;
-		}
-		.broker-header {
-			align-items: flex-start;
-			flex-wrap: wrap;
-			gap: 14px;
-		}
-		.broker-title {
-			flex-direction: column;
-			align-items: flex-start;
-		}
-		.broker-toggle {
-			margin-left: auto;
-		}
-	}
-	@media (prefers-reduced-motion: reduce) {
-		.information-chevron {
-			transition: none;
 		}
 	}
 </style>

@@ -641,7 +641,7 @@ uint8_t buttonPin = 8; // Pin for the button
 uint8_t fsrPin = 4; // Pin for the Force Sensitive Resistor (FSR)
 
 // ===========[Variables]==========
-int fsrThreshold = 300; // Threshold for determining occupancy from FSR readings
+int fsrThreshold = 400; // Threshold for determining occupancy from FSR readings
 
 // ===========[SETUP]==========
 void setup() {
@@ -788,6 +788,9 @@ void loop() {
     // [Handle FSR Sensor]
     int fsrValue = analogRead(fsrPin);
     bool isOccupied = fsrValue > fsrThreshold; // Adjust threshold as needed
+    if (!occupancyKnown || currentOccupancy != isOccupied) {
+        Serial.printf("FSR Reading: %d, Occupancy: %s\n", fsrValue, isOccupied ? "Occupied" : "Empty");
+    }
     triggerOccupancy(isOccupied);
 
     delay(100); // to save power

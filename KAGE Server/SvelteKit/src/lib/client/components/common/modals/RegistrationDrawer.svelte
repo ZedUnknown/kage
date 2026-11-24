@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { Toaster, toast } from 'svelte-sonner';
-	import XCircle from '../../icons/XCircle.svelte';
+	import CloseButton from '../CloseButton.svelte';
 	import SensitiveInput from '../SensitiveInput.svelte';
 	import SearchDropDown from '../SearchDropDown.svelte';
 
@@ -28,8 +28,6 @@
 	let dialog: HTMLDialogElement;
 	const toasterId = $props.id();
 	let backdropPressed = false;
-	let clientUsername = $state('');
-	let deviceToken = $state('');
 	const title = $derived(
 		kind === 'brokers' ? 'Add broker' : kind === 'hubs' ? 'Register hub' : 'Register client'
 	);
@@ -80,17 +78,6 @@
 
 		const fields = Object.fromEntries(new FormData(event.currentTarget as HTMLFormElement));
 
-		if (kind === 'clients' && Boolean(fields.username) !== Boolean(fields.token)) {
-			toast.error(
-				'Provide both the MQTT username and token, or leave both blank to generate credentials.',
-				{
-					toasterId
-				}
-			);
-
-			return;
-		}
-
 		const saved = await oncreate(
 			kind,
 			{
@@ -122,38 +109,23 @@
 >
 	<header class="drawer-header">
 		<div>
-			<p class="eyebrow">Workspace setup</p>
 			<h2 id="registration-title">{title}</h2>
-		</div>
-		<button
-			type="button"
-			class="icon-button"
-			aria-label="Close registration"
-			disabled={busy}
-			onclick={close}
-		>
-			<XCircle properties="size-5" />
-		</button>
-	</header>
-	<form onsubmit={submit} aria-busy={busy}>
-		<div class="drawer-content">
 			<p id="registration-description" class="muted">
 				{kind === 'brokers'
 					? 'Connect your MQTT broker using its server credentials.'
 					: 'Register your device, then configure its connection to your broker.'}
 			</p>
+		</div>
+		<CloseButton aria-label="Close registration" disabled={busy} onclick={close} />
+	</header>
+	<form onsubmit={submit} aria-busy={busy}>
+		<div class="drawer-content">
 			<fieldset disabled={busy}>
 				{#if kind === 'brokers'}
 					<label>Broker name<input name="name" required placeholder="Laboratory MQTT" /></label>
 					<label>Hostname<input name="hostname" required placeholder="mqtt.example.com" /></label>
-					<label>TLS port<input
-							name="port"
-							type="number"
-							value="8883"
-							min="1"
-							max="65535"
-							required
-						/>
+					<label
+						>TLS port<input name="port" type="number" value="8883" min="1" max="65535" required />
 					</label>
 					<label>Server MQTT username<input name="username" required autocomplete="off" /></label>
 					<div class="form-field">
@@ -165,18 +137,19 @@
 							autocomplete="new-password"
 						/>
 					</div>
-					<label>Custom CA certificate (optional)<textarea
+					<label
+						>Custom CA certificate (optional)<textarea
 							name="ca_certificate"
 							rows="3"
-							placeholder="PEM-encoded CA certificate"
-						></textarea>
+							placeholder="PEM-encoded CA certificate"></textarea>
 					</label>
 				{:else}
 					<label>Display name<input name="name" required /></label>
 					{#if kind === 'hubs'}
-						<label>Hub ID / MQTT username<input
+						<label
+							>Hub ID / MQTT username<input
 								name="hub_id"
-								pattern="[A-Za-z0-9_-]+"
+								pattern="[A-Za-z0-9_\-]+"
 								maxlength="64"
 								placeholder="HUB-01"
 								required
@@ -195,14 +168,33 @@
 							/>
 						</div>
 					{:else}
-						<label>Client ID<input
+						<label
+							>Client ID<input
 								name="pc_id"
-								pattern="[A-Za-z0-9_-]+"
+								oninput={(event) => {
+									event.currentTarget.value = event.currentTarget.value.replace(
+										/[^A-Za-z0-9_-]/g,
+										''
+									);
+								}}
+								pattern="[A-Za-z0-9_\-]+"
 								maxlength="64"
 								placeholder="PC-01"
 								required
 							/>
 						</label>
+					{/if}
+					<div class="form-field">
+						<label for="broker-token">Existing broker token (optional)</label><SensitiveInput
+							id="broker-token"
+							name="token"
+							type="password"
+							required={false}
+							autocomplete="new-password"
+							placeholder="Leave blank to generate securely"
+						/>
+					</div>
+					{#if kind === 'clients'}
 						<div class="form-field">
 							<label for="registration-hub">Hub</label>
 							<SearchDropDown
@@ -215,41 +207,17 @@
 								items={hubs.map((hub) => ({ value: hub.id, label: hub.hub_id }))}
 							/>
 						</div>
-						<label>Existing broker username (optional)<input
-								name="username"
-								bind:value={clientUsername}
-								pattern="[A-Za-z0-9_-]+"
-								maxlength="64"
-								required={!!deviceToken}
-								aria-describedby="client-credentials-help"
-							/>
-						</label>
-						<p id="client-credentials-help" class="muted">
-							Provide both the MQTT username and token, or leave both blank to generate credentials.
-						</p>
 					{/if}
-					<div class="form-field">
-						<label for="broker-token">Existing broker token (optional)</label><SensitiveInput
-							id="broker-token"
-							name="token"
-							bind:value={deviceToken}
-							type="password"
-							autocomplete="new-password"
-							required={kind === 'clients' && !!clientUsername}
-							aria-describedby={kind === 'clients' ? 'client-credentials-help' : undefined}
-							placeholder="Leave blank to generate securely"
-						/>
-					</div>
 					<p class="muted">
-						Generated credentials must be created on your external broker. Hub usernames must match
-						the Hub ID. Registration here does not complete device setup.
+						The device ID is its MQTT username. Export the broker credentials after registration.
 					</p>
 				{/if}
 			</fieldset>
 		</div>
 		<footer class="drawer-footer">
-			<button type="button" class="secondary" disabled={busy} onclick={close}>Cancel</button>
-			<button type="submit" disabled={busy || !!missingDependency}>{busy ? 'Saving...' : title}</button>
+			<button type="submit" disabled={busy || !!missingDependency}
+				>{busy ? 'Saving...' : title}</button
+			>
 		</footer>
 	</form>
 	<Toaster id={toasterId} theme="dark" position="top-right" richColors closeButton />
@@ -287,8 +255,8 @@
 		padding: 24px;
 		border-bottom: 1px solid var(--line);
 	}
-	.drawer-header .eyebrow {
-		margin-bottom: 6px;
+	.drawer-header .muted {
+		margin: 6px 0 0;
 	}
 	.drawer-header h2 {
 		margin: 0;

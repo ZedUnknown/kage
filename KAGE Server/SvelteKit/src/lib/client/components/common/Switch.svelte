@@ -55,7 +55,14 @@
 		border-color: var(--action);
 	}
 	button.switch:hover:not(:disabled) {
-		border-color: var(--accent-soft);
+		border-color: var(--action);
+	}
+	button.switch:disabled {
+		background: var(--surface-deep);
+		border-color: var(--line);
+	}
+	button.switch:disabled span {
+		background: var(--muted);
 	}
 	span {
 		width: 16px;
@@ -63,9 +70,10 @@
 		border-radius: 50%;
 		background: #fff;
 		transition: transform 180ms ease;
+		transform: translate(0, -0.5px);
 	}
 	.checked span {
-		transform: translateX(16px);
+		transform: translate(16px, -0.5px);
 	}
 	@media (prefers-reduced-motion: reduce) {
 		span {

@@ -8,7 +8,7 @@
 	import { onDestroy } from 'svelte';
 	import PanzoomContainer from '$lib/components/common/PanzoomContainer.svelte';
 	import { browser } from '$app/environment';
-	import Plus from '../icons/Plus.svelte';
+	import CloseButton from './CloseButton.svelte';
 	import DownloadSimple from '../icons/DownloadSimple.svelte';
 
 
@@ -64,19 +64,13 @@
 				<div class="flex justify-between p-5">
 
 					<div class="flex gap-2 items-center">
-						<button
-							class="p-2 cursor-pointer hover:bg-white/10 rounded-full transition-all duration-200 z-999"
+						<CloseButton
+							aria-label="Close image preview"
 							onpointerdown={(e) => {
-								e.stopImmediatePropagation();
-								e.preventDefault();
-								show = false;
+								e.stopPropagation();
 							}}
-							onclick={(e) => {
-								show = false;
-							}}
-						>
-							<Plus properties="size-6 rotate-45" />
-						</button>
+							onclick={() => (show = false)}
+						/>
 
 						<div class="text-md text-gray-300 font-bold">
 							{alt}

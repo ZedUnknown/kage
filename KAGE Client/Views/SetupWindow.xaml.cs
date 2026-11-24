@@ -25,6 +25,8 @@ public partial class SetupWindow : FluentWindow {
     private string? _hubId = null;
     private string? _pcId = null;
     private bool _isPendingRequest;
+    private SetupFile? _importedSetup;
+    private sealed record SetupFile(int Version, string Kind, string HubId, string PcId, MqttConfig Mqtt, string ProvisioningPassword);
 
 
     public SetupWindow(MqttConfig? previous = null, string? message = null) {
@@ -113,6 +115,42 @@ public partial class SetupWindow : FluentWindow {
             MqttPortBox.Text = useTls ? "8883" : "1883";
         MqttCertificateArea.IsEnabled = useTls;
         ResetAfterServerChange();
+    }
+
+    private async void ImportSetupButton_Click(object sender, RoutedEventArgs e) {
+        if (_isPendingRequest) return;
+        var dialog = new OpenFileDialog { Title = "Select the KAGE Client setup file", Filter = "KAGE setup files (*.json)|*.json" };
+        if (dialog.ShowDialog(this) != true) return;
+        PendingRequest(true);
+        try {
+            using var file = File.OpenRead(dialog.FileName);
+            if (file.Length > 32768) throw new InvalidDataException();
+            var setup = await JsonSerializer.DeserializeAsync<SetupFile>(file, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }, _lifetime.Token);
+            if (setup is not { Version: 1, Kind: "client", Mqtt: not null }
+                || !MqttAddress.IsValid(setup.Mqtt) || !MqttAddress.IsTopicId(setup.HubId)
+                || !MqttAddress.IsTopicId(setup.PcId) || !MqttAddress.IsTopicId(setup.Mqtt.Username)
+                || string.IsNullOrEmpty(setup.Mqtt.Password) || setup.Mqtt.Password.Length > 256
+                || !ProvisioningPassword.IsValid(setup.ProvisioningPassword)) {
+                throw new InvalidDataException();
+            }
+            _lifetime.Token.ThrowIfCancellationRequested();
+            ServerAddressBox.Text = setup.Mqtt.Address;
+            MqttTlsBox.IsChecked = setup.Mqtt.UseTls;
+            MqttPortBox.Text = setup.Mqtt.Port.ToString();
+            MqttUsernameBox.Text = setup.Mqtt.Username;
+            MqttTokenBox.Password = setup.Mqtt.Password;
+            MqttCertificateModeBox.SelectedIndex = string.IsNullOrWhiteSpace(setup.Mqtt.CertificateAuthorityPem) ? 0 : 1;
+            MqttCertificateBox.Text = setup.Mqtt.CertificateAuthorityPem ?? "";
+            _importedSetup = setup;
+            StatusText.Text = "Setup file loaded. Connect to verify your assignment.";
+            StatusText.Foreground = Brushes.Gray;
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidDataException) {
+            StatusText.Text = "Could not import the file. Select a valid Windows Client setup file from KAGE.";
+            StatusText.Foreground = Brushes.Red;
+        }
+        finally { PendingRequest(false); }
     }
 
     private void MqttCertificateBrowseButton_Click(object sender, RoutedEventArgs e) {
@@ -240,6 +278,7 @@ public partial class SetupWindow : FluentWindow {
         MqttCertificateArea.IsEnabled = !isPending && MqttTlsBox.IsChecked == true;
         MqttUsernameBox.IsEnabled = !isPending;
         MqttTokenBox.IsEnabled = !isPending;
+        ImportSetupButton.IsEnabled = !isPending;
         ServerConnectButton.IsEnabled = !isPending;
         ServerNextButton.IsEnabled = !isPending;
         RegisterPcButton.IsEnabled = !isPending;
@@ -274,6 +313,12 @@ public partial class SetupWindow : FluentWindow {
         PendingRequest(true);
         MqttSession session = _mqttSession;
         ClientConfig config = new() { HubId = _hubId!, PcId = _pcId!, Mqtt = _mqttConfig };
+        if (_importedSetup is { } imported && imported.HubId == config.HubId && imported.PcId == config.PcId
+            && imported.Mqtt.Username == config.Mqtt.Username && imported.Mqtt.Address == config.Mqtt.Address
+            && imported.Mqtt.Port == config.Mqtt.Port && imported.Mqtt.Password == config.Mqtt.Password
+            && imported.Mqtt.UseTls == config.Mqtt.UseTls) {
+            config.ProvisioningPasswordHash = ProvisioningPassword.Hash(imported.ProvisioningPassword);
+        }
         FinishStatusText.Text = "Registering this PC through MQTT...";
         FinishStatusText.Foreground = Brushes.Gray;
         FinishStatusText.Visibility = Visibility.Visible;

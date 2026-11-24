@@ -4,6 +4,9 @@ namespace KAGE_Client.Models;
 
 // JsonPropertyName maps a JSON field such as "hub" to its C# property, Hub.
 public class ClientStateData {
+    [JsonPropertyName("provisioning_password_hash")]
+    public string? ProvisioningPasswordHash { get; set; }
+
     [JsonPropertyName("policies")]
     public ClientPolicyState? Policies { get; set; }
 

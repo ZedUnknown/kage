@@ -4,6 +4,7 @@ public class ClientConfig {
 
     public int ConfigVersion { get; set; } = 1;
     public bool RequiresSetup { get; set; }
+    public string? ProvisioningPasswordHash { get; set; }
 
     public string HubId { get; set; } = "";
     public string PcId { get; set; } = "";

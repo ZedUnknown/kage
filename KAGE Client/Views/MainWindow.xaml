@@ -303,6 +303,7 @@
                                         </Grid>
                                         <ui:Button IsEnabled="{Binding CanRefresh}" Style="{StaticResource RefreshAction}" Click="RefreshButton_Click" ToolTip="Request the latest client state." AutomationProperties.Name="Refresh client state"/>
                                         <TextBlock Text="{Binding LastChecked}" FontSize="11" Foreground="{StaticResource MutedBrush}" Margin="0,9,0,0" HorizontalAlignment="Center"/>
+                                        <ui:Button Content="Break out" Margin="0,12,0,0" HorizontalAlignment="Center" Click="BreakOutButton_Click"/>
                                     </StackPanel>
                                 </Border>
                             </Grid>

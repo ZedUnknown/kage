@@ -1,0 +1,4 @@
+docker-run.bat text eol=crlf
+docker-run.sh text eol=lf
+generate-encryption-key.bat text eol=crlf
+generate-encryption-key.sh text eol=lf

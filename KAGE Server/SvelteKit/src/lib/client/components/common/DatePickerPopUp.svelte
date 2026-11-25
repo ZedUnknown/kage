@@ -2,6 +2,7 @@
     import DateRangePicker from "./DateRangePicker.svelte";
     import { getLocalDate } from "$lib/utils/datetime";
 	import CalendarBlank from "../icons/CalendarBlank.svelte";
+	import CloseButton from "./CloseButton.svelte";
 
     const now = new Date();
 
@@ -75,7 +76,7 @@
     }}
     role="button"
     tabindex="0"
-    onkeydown={(e) => {}}
+    onkeydown={(e) => { if (e.key === 'Escape') onCloseTrigger(); }}
 >
 	<div class="w-full min-h-screen flex flex-col text-center pointer-events-none">
         <div class="my-auto flex flex-col justify-center items-center">
@@ -83,8 +84,9 @@
             <div class="flex flex-col gap-5 px-6 py-4 pointer-events-auto form-container relative sm:max-w-md w-full bg-white border border-b-2 border-gray-300 rounded-xl shadow-lg backdrop-blur-xs">
 
                 <div>
-                    <div class="text-left text-lg font-bold mb-4">
-                        Select Range
+                    <div class="flex items-center justify-between gap-3 text-left text-lg font-bold mb-4">
+                        <span>Select Range</span>
+                        <CloseButton aria-label="Close date range picker" onclick={onCloseTrigger} />
                     </div>
 
                     <div class="flex flex-col gap-2.5">

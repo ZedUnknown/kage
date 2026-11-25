@@ -12,8 +12,9 @@
 	import { date } from '#lib/client/format.ts';
 	import ClientActions from '#lib/client/components/common/ClientActions.svelte';
 	import Devices from '#lib/client/components/icons/Devices.svelte';
-	import Info from '#lib/client/components/icons/Info.svelte';
-	import CaretDown from '#lib/client/components/icons/CaretDown.svelte';
+	import InformationSummary from '#lib/client/components/common/InformationSummary.svelte';
+	import StatusDot from '#lib/client/components/common/StatusDot.svelte';
+	import EmptyState from '#lib/client/components/common/EmptyState.svelte';
 
 	const workspace = getWorkspace();
 	let overview = $derived(workspace.overview);
@@ -64,6 +65,7 @@
 			label="Filter clients by status"
 			bind:value={status}
 		/>
+		<div class="card-grid client-grid">
 		{#each results.items as device (device.id)}
 			{@const confirmed = device.credential_status === 'admin_confirmed'}
 			<section
@@ -85,7 +87,7 @@
 									role="status"
 									aria-label={`Client status: ${label(device.connection_state)}`}
 								>
-									<span class="status-dot" aria-hidden="true"></span>{label(device.connection_state)}
+									<StatusDot />{label(device.connection_state)}
 								</span>
 							</div>
 						</div>
@@ -93,9 +95,7 @@
 					<ClientActions {device} disabled={actions.busy} onaction={action} />
 				</header>
 				<details class="client-details">
-					<summary>
-						<span class="information-label"><Info properties="size-4" />Client Information</span><span class="information-chevron" aria-hidden="true"><CaretDown properties="size-4" /></span>
-					</summary>
+					<InformationSummary label="Client Information" />
 					<div class="client-information">
 						<dl>
 							<div>
@@ -151,35 +151,55 @@
 						>
 							Confirm external provisioning
 						</button>
-						<!-- {:else}
-						<span class="provisioning-confirmed">Provisioning confirmed</span> -->
 					{/if}
 				</footer>
 			</section>
 		{:else}
-			<div class="empty empty-state">
+			<EmptyState
+				actionLabel={overview.clients.length ? undefined : 'Register your first client'}
+				disabled={actions.busy}
+				onAction={overview.clients.length ? undefined : openRegistration}
+			>
 				{#if overview.clients.length}
 					<p>No clients are {status}.</p>
 				{:else}
 					<p>No clients registered. Register a client to connect your workstation.</p>
-					<button
-						type="button"
-						disabled={actions.busy}
-						aria-haspopup="dialog"
-						onclick={openRegistration}
-					>
-						Register your first client
-					</button>
 				{/if}
-			</div>
+			</EmptyState>
 		{/each}
+		</div>
 	{/snippet}
 </WorkspacePage>
 
 <style>
-	:global(.connection-filters) + .client-card,
-	:global(.connection-filters) + .empty-state {
+	.client-grid {
+		grid-template-columns: repeat(4, minmax(0, 1fr));
 		margin-top: 32px;
+	}
+	@media (max-width: 1571px) {
+		.client-grid {
+			grid-template-columns: repeat(3, minmax(0, 1fr));
+		}
+	}
+	@media (max-width: 1255px) {
+		.client-grid {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+	}
+	@media (max-width: 907px) {
+		.client-grid {
+			grid-template-columns: minmax(0, 1fr);
+		}
+	}
+	@media (max-width: 800px) {
+		.client-grid {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+	}
+	@media (max-width: 651px) {
+		.client-grid {
+			grid-template-columns: minmax(0, 1fr);
+		}
 	}
 	.client-card {
 		padding: 22px;
@@ -274,31 +294,6 @@
 		border-radius: 10px;
 		background: var(--surface-deep);
 	}
-	.client-details summary {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 16px;
-		margin: 0;
-		padding: 14px 16px;
-		list-style: none;
-	}
-	.client-details summary::-webkit-details-marker {
-		display: none;
-	}
-	.information-label {
-		display: inline-flex;
-		align-items: center;
-		gap: 10px;
-	}
-	.information-chevron {
-		display: inline-flex;
-		flex-shrink: 0;
-		transition: transform 180ms ease;
-	}
-	.client-details[open] .information-chevron {
-		transform: rotate(180deg);
-	}
 	.client-information {
 		margin: 0 16px;
 		padding: 16px 0;
@@ -312,7 +307,7 @@
 	}
 	dl > div {
 		display: grid;
-		grid-template-columns: 150px minmax(0, 1fr);
+		grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 		align-items: baseline;
 		gap: 8px;
 	}
@@ -326,10 +321,18 @@
 	}
 	.client-footer {
 		display: flex;
-		align-items: center;
-		flex-wrap: wrap;
-		gap: 12px;
+		align-items: stretch;
+		flex-wrap: nowrap;
+		gap: 8px;
 		margin-top: 20px;
+	}
+	.client-footer > button {
+		flex: 1 1 0;
+		min-width: 0;
+		padding-inline: 8px;
+		font-size: 11px;
+		line-height: 1.25;
+		text-align: center;
 	}
 	@media (max-width: 600px) {
 		.client-card {
@@ -339,13 +342,12 @@
 			grid-template-columns: minmax(0, 1fr);
 			gap: 4px;
 		}
-		.client-footer > button {
-			width: 100%;
+		.client-footer {
+			flex-wrap: wrap;
 		}
-	}
-	@media (prefers-reduced-motion: reduce) {
-		.information-chevron {
-			transition: none;
+		.client-footer > button {
+			flex-basis: 100%;
+			width: 100%;
 		}
 	}
 </style>

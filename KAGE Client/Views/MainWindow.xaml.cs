@@ -74,6 +74,7 @@ public partial class MainWindow : FluentWindow, INotifyPropertyChanged {
     public ClientPolicySummary PolicySummary { get; private set; } = ClientPolicySummary.Create(null, false);
     private readonly MqttClient _mqttClient;
     private Task? _mqttTask;
+    private Task? _provisioningSave;
 
 // ============================================================
 
@@ -227,6 +228,11 @@ public partial class MainWindow : FluentWindow, INotifyPropertyChanged {
             return;
 
         _state = state;
+        if (!ProvisioningPassword.IsValidHash(_config.ProvisioningPasswordHash)
+            && ProvisioningPassword.IsValidHash(state.ProvisioningPasswordHash)) {
+            _config.ProvisioningPasswordHash = state.ProvisioningPasswordHash;
+            _provisioningSave = SaveProvisioningPasswordAsync();
+        }
         _policiesConnected = true;
         commandManager.Recover(state);
         _stateRevision++;
@@ -383,12 +389,74 @@ public partial class MainWindow : FluentWindow, INotifyPropertyChanged {
         _lockOverlay?.Dispose();
         _lockOverlay = null;
         _config.RequiresSetup = true;
+        if (_provisioningSave != null) await _provisioningSave;
         try { await ConfigService.SaveAsync(_config); }
         catch (Exception ex) {
             Trace.WriteLine($"Could not save setup state: {ex.GetType().Name}");
         }
         if (_isClosed) return;
-        SetupWindow setup = new(_config.Mqtt, message);
+        OpenSetup(new SetupWindow(_config.Mqtt, message));
+    }
+
+    private async Task SaveProvisioningPasswordAsync() {
+        try { await ConfigService.SaveAsync(_config); }
+        catch (Exception ex) { Trace.WriteLine($"Could not save provisioning password: {ex.GetType().Name}"); }
+    }
+
+    private async void BreakOutButton_Click(object sender, RoutedEventArgs e) {
+        if (_isClosed || _returningToSetup) return;
+        if (!ProvisioningPassword.IsValidHash(_config.ProvisioningPasswordHash)) {
+            System.Windows.MessageBox.Show(this,
+                "Ask your administrator to open Device setup and show the force provisioning password. Connect this Client to KAGE to receive it.",
+                "Break out");
+            return;
+        }
+        var password = new System.Windows.Controls.PasswordBox();
+        var message = new System.Windows.Controls.TextBlock {
+            Text = "Enter the force provisioning password to clear this Client’s saved configuration.",
+            TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 10)
+        };
+        var confirm = new System.Windows.Controls.Button {
+            Content = "Clear configuration", IsDefault = true, Margin = new Thickness(0, 12, 0, 0)
+        };
+        var cancel = new System.Windows.Controls.Button {
+            Content = "Cancel", IsCancel = true, Margin = new Thickness(0, 8, 0, 0)
+        };
+        var panel = new System.Windows.Controls.StackPanel { Margin = new Thickness(20) };
+        panel.Children.Add(message);
+        panel.Children.Add(password);
+        panel.Children.Add(confirm);
+        panel.Children.Add(cancel);
+        var dialog = new Window {
+            Owner = this, Title = "Break out", Width = 380,
+            SizeToContent = SizeToContent.Height, ResizeMode = ResizeMode.NoResize,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner, Content = panel
+        };
+        System.Windows.Automation.AutomationProperties.SetName(password, "Force provisioning password");
+        dialog.Loaded += (_, _) => password.Focus();
+        confirm.Click += (_, _) => {
+            if (ProvisioningPassword.Matches(password.Password, _config.ProvisioningPasswordHash)) dialog.DialogResult = true;
+            else {
+                message.Text = "Incorrect force provisioning password. Try again.";
+                password.Clear();
+                password.Focus();
+            }
+        };
+        if (dialog.ShowDialog() != true || _returningToSetup || _isClosed) return;
+        _returningToSetup = true;
+        try {
+            if (_provisioningSave != null) await _provisioningSave;
+            ConfigService.Delete();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) {
+            _returningToSetup = false;
+            System.Windows.MessageBox.Show(this, "Could not clear the saved configuration. Check access and try again.", "Break out");
+            return;
+        }
+        OpenSetup(new SetupWindow());
+    }
+
+    private void OpenSetup(SetupWindow setup) {
         Application.Current.MainWindow = setup;
         setup.Show();
         setup.Activate();

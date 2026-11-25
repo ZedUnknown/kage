@@ -66,11 +66,12 @@
 					</p>
 				</li>
 				<li>
-					<h3>Add a device account</h3>
+					<h3>Provision device accounts</h3>
 					<p>
-						Register a Hub or Client in KAGE. Create its account in your broker using the issued
-						credentials, then apply the topic permissions below. Verify access before confirming
-						provisioning under Hubs or Clients.
+						Register your Hubs and Clients in KAGE, then use <strong>Export credentials</strong> for
+						the broker. In EMQX, import authentication under Authentication and topic permissions
+						under Authorization → Username. Add the final Deny <code>#</code> rule under All Users
+						once all required allow rules are in place.
 					</p>
 				</li>
 				<li>
@@ -112,6 +113,7 @@
 								<li><code>kage/client/+/+/state</code></li>
 								<li><code>kage/client/+/+/command</code></li>
 								<li><code>kage/hub/live/+/ping_response</code></li>
+								<li><code>kage/hub/live/+/paired_nodes_request</code></li>
 								<li><code>kage/hub/live/+/identify</code></li>
 								<li><code>kage/hub/live/+/pairing_response/+</code></li>
 								<li><code>kage/hub/live/+/unpair_response/+</code></li>
@@ -127,11 +129,12 @@
 						<dd>
 							<code>ping_request</code>, <code>status</code>, <code>pairing_request</code>,
 							<code>pairing_confirm</code>, <code>unpair_request</code>,
-							<code>unpair_confirm</code>, <code>identify_result</code>
+							<code>unpair_confirm</code>, <code>identify_result</code>, <code>paired_nodes</code>
 						</dd>
 						<dt>Read</dt>
 						<dd>
-							<code>ping_response</code>, <code>identify</code>, <code>pairing_response/+</code>,
+							<code>ping_response</code>, <code>paired_nodes_request</code>, <code>identify</code>,
+							<code>pairing_response/+</code>,
 							<code>unpair_response/+</code>
 						</dd>
 					</dl>

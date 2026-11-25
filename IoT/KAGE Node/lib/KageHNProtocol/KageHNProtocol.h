@@ -5,7 +5,6 @@
 #include <esp_now.h>
 #include <esp_wifi.h>
 #include <esp_err.h>
-#include <atomic>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 
@@ -129,7 +128,8 @@ QueueHandle_t receivedPackets = nullptr;
 QueueHandle_t sendResults = nullptr;
 bool sendPending = false;
 unsigned long sendStartedAt = 0;
-std::atomic<uint32_t> rxPackets{0}, rxDropped{0}, rxInvalid{0};
+// Receive counters are updated only by the ESP-NOW callback on the Wi-Fi task.
+uint32_t rxPackets = 0, rxDropped = 0, rxInvalid = 0;
 uint32_t txPackets = 0, txFailures = 0, txTimeouts = 0, radioRecoveries = 0;
 
 bool addPeer(const uint8_t* macAddress);

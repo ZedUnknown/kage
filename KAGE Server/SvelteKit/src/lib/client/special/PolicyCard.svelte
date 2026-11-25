@@ -180,17 +180,6 @@
 	.policy-fields :global(.full-width) {
 		grid-column: 1 / -1;
 	}
-	.policy-fields :global(input[type='checkbox']) {
-		width: 16px;
-		height: 16px;
-		margin: 0;
-		accent-color: var(--action);
-	}
-	.policy-fields :global(.checkbox-field) {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-	}
 	.policy-footer {
 		display: flex;
 		align-items: center;

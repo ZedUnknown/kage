@@ -6,6 +6,7 @@ import { decrypt, encrypt, token } from './security.ts';
 import {
 	InputError,
 	integer,
+	macAddress,
 	password,
 	secret as secretValue,
 	segment,
@@ -18,6 +19,7 @@ import { probeBroker, probeConnection, probeClientConnection } from './mqtt/prob
 import { probeConnectionError } from './mqtt/probe-errors.ts';
 import { deleteResource, forceUnpairNode } from './deletion.ts';
 import { occupancyTimeoutSeconds } from './mqtt/occupancy.ts';
+import { restorePairedNode, savedPairingsQuery } from './mqtt/paired-nodes.ts';
 
 async function audit(db: pg.PoolClient, user: Account, action: string, id?: string) {
 	await db.query(
@@ -76,6 +78,7 @@ export async function dashboard(user: Account) {
 		pairing: `SELECT p.*,CASE WHEN p.status IN ('pending','approved') AND p.expires_at<=now() THEN 'expired' ELSE p.status END AS status,
 			h.hub_id AS hub_code FROM kage_pairing_requests p JOIN kage_hubs h ON h.tenant_id=p.tenant_id AND h.id=p.hub_id
 			WHERE p.tenant_id=$1 ORDER BY (p.status IN ('pending','approved') AND p.expires_at>now()) DESC,p.last_seen DESC LIMIT 100`,
+		saved_pairings: savedPairingsQuery,
 		commands: `${visibleCommands}
 			SELECT id,kind,status,client_id,node_id,created_at,expires_at,published_at,report
 			FROM visible_commands ORDER BY created_at DESC,id DESC LIMIT 100`,
@@ -398,15 +401,15 @@ export async function manage(user: Account, resource: string, input: Record<stri
 			const isHub = resource === 'hubs';
 
 			if (input.action === 'create') {
-				if (!isHub && Boolean(input.username) !== Boolean(input.token)) {
-					throw new InputError(
-						'Provide both the MQTT username and token, or leave both blank to generate credentials.'
-					);
-				}
-
 				const id = randomUUID();
 				let brokerId: string;
 				const code = segment(isHub ? input.hub_id : input.pc_id);
+			if (!isHub && input.pc_id !== code) {
+				throw new InputError('Client ID must contain only letters, digits, underscores or hyphens');
+			}
+			if (!isHub && input.username && input.username !== code) {
+				throw new InputError('The MQTT username must match the Client ID.');
+			}
 
 				if (isHub) {
 					brokerId = uuid(input.broker_id);
@@ -446,9 +449,15 @@ export async function manage(user: Account, resource: string, input: Record<stri
 					]);
 				}
 
-				const secret = input.token ? secretValue(input.token, 'device token', 256) : token();
-				const usesExistingToken = Boolean(input.token);
-				const username = isHub ? code : input.username ? segment(input.username) : `pc-${id}`;
+				let suppliedToken = '';
+				if (typeof input.token === 'string') {
+					suppliedToken = input.token.trim() ? input.token : '';
+				} else if (input.token != null) {
+					suppliedToken = secretValue(input.token, 'device token', 256);
+				}
+				const secret = suppliedToken ? secretValue(suppliedToken, 'device token', 256) : token();
+				const usesExistingToken = Boolean(suppliedToken);
+			const username = code;
 				const broker = (
 					await db.query(
 						'SELECT username FROM kage_mqtt_brokers WHERE tenant_id=$1 AND id=$2 FOR NO KEY UPDATE',
@@ -459,6 +468,12 @@ export async function manage(user: Account, resource: string, input: Record<stri
 				if (username === broker.username) {
 					throw new InputError('Server and device MQTT identities must be separate');
 				}
+			if ((await db.query(
+				'SELECT 1 FROM kage_device_credentials WHERE tenant_id=$1 AND broker_id=$2 AND username=$3',
+				[tenant, brokerId, username]
+			)).rowCount) {
+				throw new InputError('This MQTT username is already registered on the broker. Choose a different device ID.', 409);
+			}
 
 				const credentialId = randomUUID();
 				await db.query(
@@ -482,8 +497,8 @@ export async function manage(user: Account, resource: string, input: Record<stri
 					token: usesExistingToken ? undefined : secret,
 					status: 'generated',
 					message: usesExistingToken
-						? `${isHub ? 'Hub' : 'Client'} registered. Configure its credentials and ACL on the external broker before confirming provisioning.`
-						: 'Save this token now. Configure it and its ACL on the external broker before confirming provisioning.'
+						? `${isHub ? 'Hub' : 'Client'} registered. Export its broker permissions before confirming provisioning.`
+						: 'Device registered. Export its authentication and topic rules from Brokers.'
 				};
 			}
 
@@ -514,6 +529,10 @@ export async function manage(user: Account, resource: string, input: Record<stri
 				throw new InputError('Unsupported device action');
 			}
 
+			if (input.action === 'rotate' || input.action === 'revoke') {
+				await db.query('DELETE FROM kage_device_setup_downloads WHERE credential_id=$1', [credential.id]);
+				await db.query('DELETE FROM kage_provisioning_portal_files WHERE credential_id=$1', [credential.id]);
+			}
 			await db.query('UPDATE kage_mqtt_brokers SET updated_at=now() WHERE tenant_id=$1 AND id=$2', [
 				tenant,
 				credential.broker_id
@@ -577,6 +596,17 @@ export async function manage(user: Account, resource: string, input: Record<stri
 		}
 
 		if (resource === 'pairing') {
+		if (input.action === 'restore') {
+			const nodeId = await restorePairedNode(
+				db,
+				tenant,
+				uuid(input.hub_id),
+				macAddress(input.mac_address)
+			);
+			if (nodeId) await audit(db, user, 'pairing.restore', nodeId);
+			return { ok: true, message: 'Saved Node pairing restored.' };
+		}
+
 			const id = uuid(input.id);
 			const row = (
 				await db.query(
@@ -638,7 +668,7 @@ export async function manage(user: Account, resource: string, input: Record<stri
 				return {
 					ok: true,
 					message:
-						'Node force-unpaired in KAGE. Reset or re-pair the physical devices before using this Node again.'
+					'Node force-unpaired in KAGE. If the Hub still reports the saved pairing, you can restore it from Pairing.'
 				};
 			}
 

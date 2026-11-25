@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { tick } from 'svelte';
 	import ConfirmationPopup from './ConfirmationPopup.svelte';
+	import DotsThree from '../icons/DotsThree.svelte';
 
 	let {
 		device,
@@ -60,13 +61,7 @@
 		{disabled}
 		onclick={toggle}
 	>
-		<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-			<circle cx="5" cy="12" r="2" /><circle cx="12" cy="12" r="2" /><circle
-				cx="19"
-				cy="12"
-				r="2"
-			/>
-		</svg>
+		<DotsThree properties="size-5" />
 	</button>
 	{#if open}
 		<div

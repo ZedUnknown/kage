@@ -198,6 +198,18 @@ async function tick(connection: Connection) {
 		if (result.some((entry) => entry.qos === 128)) throw new Error('Subscription rejected');
 
 		connection.subscriptions = fingerprint;
+		const reportingHubs = (
+			await pool.query(
+				`SELECT h.hub_id FROM kage_hubs h
+				JOIN kage_device_credentials d ON d.tenant_id=h.tenant_id AND d.hub_id=h.id
+				WHERE h.tenant_id=$1 AND h.broker_id=$2 AND d.status='admin_confirmed'
+				AND h.paired_nodes_seen_at IS NOT NULL`,
+				[b.tenant_id, b.id]
+			)
+		).rows;
+		for (const hub of reportingHubs) {
+			await publish(connection, `kage/hub/live/${hub.hub_id}/paired_nodes_request`, 'report');
+		}
 	}
 
 	for (const client of clients.filter((c) => c.dirty)) {

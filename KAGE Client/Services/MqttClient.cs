@@ -86,6 +86,7 @@ public sealed class MqttClient : IDisposable {
                         hub_id = _config.HubId,
                         pc_id = _config.PcId,
                         protocol_version = 1,
+                        command_version = Journal.Version,
                         capabilities = new[] { "command_lifecycle_v1", "presence_v1", "security_state_v1", "connection_test_v1", "activity_v1" },
                         safety_button = CommandManager.safetyButton,
                         session_id = _session.PresenceSession

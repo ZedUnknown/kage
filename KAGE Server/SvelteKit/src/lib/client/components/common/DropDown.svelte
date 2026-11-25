@@ -17,6 +17,7 @@
         required = false,
         disabled = false,
         loading = false,
+        controlled = false,
         onchange,
         searchable = false
     }: DropdownProps & { searchable?: boolean } = $props();
@@ -74,10 +75,10 @@
     function choose(item: DropdownItem) {
         if (unavailable() || item.disabled) return;
 
-        value = item.value;
+        if (!controlled) value = item.value;
         invalid = false;
         close();
-        onchange?.(value, items.find((entry) => entry.value === value));
+        onchange?.(item.value, items.find((entry) => entry.value === item.value));
         control.focus();
     }
 
@@ -223,6 +224,7 @@
         if (!(event.relatedTarget instanceof Node) || !root.contains(event.relatedTarget)) close();
     }}
 >
+    <!-- The hidden form control supplies FormData, required validation, and fieldset semantics. -->
     <select
         class="form-value"
         {name}

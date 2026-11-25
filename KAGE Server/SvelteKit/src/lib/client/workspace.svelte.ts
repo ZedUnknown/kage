@@ -14,7 +14,6 @@ export class Workspace {
 	busy = $state(false);
 	disconnected = $state(false);
 	refreshing = $state(false);
-	foregroundLoading = $state(false);
 	deliveries = $state<Record<string, { username: string; token: string } | undefined>>({});
 	mobileOpen = $state(false);
 	isMobile = $state(false);
@@ -37,18 +36,12 @@ export class Workspace {
 		this.account = data.account;
 	}
 
-	refresh = (foreground = false) => {
-		if (foreground) this.foregroundLoading = true;
-		if (this.pendingRefresh) {
-			return foreground
-				? this.pendingRefresh.finally(() => (this.foregroundLoading = false))
-				: this.pendingRefresh;
-		}
+	refresh = () => {
+		if (this.pendingRefresh) return this.pendingRefresh;
 
 		this.refreshing = true;
 		this.pendingRefresh = this.fetchDashboard().finally(() => {
 			this.refreshing = false;
-			this.foregroundLoading = false;
 			this.pendingRefresh = undefined;
 		});
 
@@ -112,7 +105,7 @@ export function getWorkspace(): Workspace {
 }
 
 export function createPageActions(workspace = getWorkspace()) {
-	async function action(resource: string, body: object, errorToasterId?: string) {
+	async function action(resource: string, body: object, errorToasterId?: string, successToasterId?: string) {
 		if (workspace.busy) return false;
 
 		const deliveryPath = page.url.pathname;
@@ -132,7 +125,10 @@ export function createPageActions(workspace = getWorkspace()) {
 				workspace.deliveries[deliveryPath] = { username: result.username, token: result.token };
 			}
 
-			toast.success(result.message || 'Saved.');
+			if (successToasterId) {
+				toast.success(result.message || 'Saved.');
+			}
+
 			// Finish any earlier snapshot before fetching the saved state.
 			if (workspace.refreshing) await workspace.refresh();
 

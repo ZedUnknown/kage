@@ -544,6 +544,7 @@
                                                     <Label Content="Client MQTT token" Target="{Binding ElementName=MqttTokenBox}" Padding="0" Margin="0,0,0,9" Foreground="#EAE7E7" FontSize="12"/>
                                                     <PasswordBox x:Name="MqttTokenBox" Style="{StaticResource SetupTokenInput}" Margin="0,0,0,14" AutomationProperties.Name="MQTT token"/>
                                                     <TextBlock Text="Use the username and token confirmed under Clients in KAGE, not the Hub or admin account. Your assigned Hub and PC are retrieved automatically. Credentials are case-sensitive." Style="{StaticResource StatusMessage}" Margin="0,0,0,14"/>
+                                                    <ui:Button x:Name="ImportSetupButton" Content="Import setup file" Margin="0,0,0,12" Click="ImportSetupButton_Click"/>
                                                     <ui:Button x:Name="ServerConnectButton" Style="{StaticResource ServerAction}" Appearance="Primary" Click="ServerConnectButton_Click"/>
                                                     <Grid Margin="0,18,0,0">
                                                         <Grid.ColumnDefinitions>

@@ -3,10 +3,31 @@
 	import { getWorkspace, createPageActions } from '#lib/client/workspace.svelte.ts';
 	import SignOut from '#lib/client/components/icons/SignOut.svelte';
 	import SensitiveInput from '#lib/client/components/common/SensitiveInput.svelte';
+	import StatusDot from '#lib/client/components/common/StatusDot.svelte';
 
 	const workspace = getWorkspace();
 	const actions = createPageActions(workspace);
-	const { submit, logout } = actions;
+	const { logout } = actions;
+
+	let fullName = $state(workspace.account.full_name);
+	let currentPassword = $state('');
+	let newPassword = $state('');
+	const hasChanges = $derived(
+		fullName !== workspace.account.full_name || currentPassword.length > 0 || newPassword.length > 0
+	);
+
+	async function handleSubmit(event: SubmitEvent) {
+		event.preventDefault();
+		const form = event.currentTarget as HTMLFormElement;
+		const fields = Object.fromEntries(new FormData(form));
+		const saved = await actions.action('account', fields);
+
+		if (saved) {
+			fullName = workspace.account.full_name;
+			currentPassword = '';
+			newPassword = '';
+		}
+	}
 </script>
 
 <WorkspacePage
@@ -32,7 +53,7 @@
 							class="verification-status"
 							class:verified={!!workspace.account.email_verified_at}
 						>
-							<span class="status-dot" aria-hidden="true"></span>
+							<StatusDot />
 							{workspace.account.email_verified_at ? 'Verified' : 'Not verified'}
 						</span>
 					</dd>
@@ -40,7 +61,7 @@
 			</dl>
 		</section>
 
-		<form class="account-panel account-form" onsubmit={(e) => submit(e, 'account')}>
+		<form class="account-panel account-form" onsubmit={handleSubmit}>
 			<section class="settings-section" aria-labelledby="profile-title">
 				<div class="section-heading">
 					<h2 id="profile-title">Profile</h2>
@@ -52,7 +73,7 @@
 						id="full-name"
 						name="full_name"
 						autocomplete="name"
-						value={workspace.account.full_name}
+						bind:value={fullName}
 						required
 					/>
 				</div>
@@ -68,6 +89,7 @@
 						<SensitiveInput
 							id="current-password"
 							name="current_password"
+							bind:value={currentPassword}
 							type="password"
 							autocomplete="current-password"
 							aria-describedby="password-help"
@@ -79,6 +101,7 @@
 						<SensitiveInput
 							id="new-password"
 							name="new_password"
+							bind:value={newPassword}
 							type="password"
 							minlength={12}
 							maxlength={256}
@@ -93,7 +116,7 @@
 				</div>
 			</section>
 			<div class="save-actions">
-				<button disabled={actions.busy}>{actions.busy ? 'Saving...' : 'Save account'}</button>
+				<button disabled={actions.busy || !hasChanges}>{actions.busy ? 'Saving...' : 'Save account'}</button>
 			</div>
 		</form>
 
@@ -212,6 +235,15 @@
 		justify-content: flex-end;
 		margin-top: auto;
 		padding-top: 8px;
+	}
+	.account-footer button.danger {
+		border-color: var(--action);
+		background: var(--action);
+		color: #fff;
+	}
+	.account-footer button.danger:hover:not(:disabled) {
+		border-color: var(--action-hover);
+		background: var(--action-hover);
 	}
 	@media (max-width: 1100px) {
 		.settings-section {

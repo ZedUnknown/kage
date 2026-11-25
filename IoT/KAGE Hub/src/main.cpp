@@ -4,6 +4,7 @@
 #include <WiFiClientSecure.h>
 #include <PubSubClient.h> // MQTT client library
 #include <cJSON.h>
+#include <freertos/FreeRTOS.h>
 #include <sys/time.h>
 #include <KageHNProtocol.h>
 #include <KageHubButton.h>
@@ -32,6 +33,15 @@ int mqttPort;
 const int MAX_PAIRED_NODES = 100;
 uint8_t pairedNodeMacs[MAX_PAIRED_NODES][6];  // [0]  → Node MAC, 6 bytes
                                               // [99] → Node MAC, 6 bytes
+portMUX_TYPE mqttStateLock = portMUX_INITIALIZER_UNLOCKED;
+// Ask the main loop to queue a snapshot before the next periodic report.
+bool savedNodesRequested = true;
+
+void requestSavedNodes() {
+    portENTER_CRITICAL(&mqttStateLock);
+    savedNodesRequested = true;
+    portEXIT_CRITICAL(&mqttStateLock);
+}
 
 // [Runtime Variables]
 uint8_t approvedNodeMac[MAX_PAIRED_NODES][6]; // Approved Node MAC address for pairing
@@ -130,6 +140,7 @@ bool savePairedNodes() {
     preferences.end();
 
     if (bytesWritten == sizeof(pairedNodeMacs)) {
+        requestSavedNodes();
         Serial.println("Paired Nodes saved to NVS.");
         return true;
     }
@@ -207,6 +218,7 @@ void clearPairedNodes() {
         sizeof(pairedNodeMacs)
     );
 
+    requestSavedNodes();
     Serial.println("TEST: Paired Node data cleared.");
 }
 
@@ -445,15 +457,34 @@ struct MQTTMessage {
     char payload[256];
     bool retained;
 };
+// One slot holds the latest complete snapshot without enlarging the regular queues.
+struct PairedNodesReport {
+    char payload[sizeof("{\"version\":1,\"mac_addresses\":[]}") +
+                 MAX_PAIRED_NODES * (sizeof("\"00:00:00:00:00:00\",") - 1)];
+};
 QueueHandle_t mqttIncoming = nullptr;
 QueueHandle_t mqttOutgoing = nullptr;
-std::atomic<bool> mqttOnline{false};
-std::atomic<uint32_t> mqttCommandDrops{0};
+QueueHandle_t pairedNodesOutgoing = nullptr;
+bool mqttOnline = false;
+// The MQTT listener on the worker task owns this counter.
+uint32_t mqttCommandDrops = 0;
 // Fresh presence lets the admin worker recover after it reconnects. Retained
 // startup status alone is deliberately not treated as live presence by KAGE.
 const unsigned long mqttStatusInterval = 15000;
 unsigned long mqttStatusLastSentAt = 0;
 
+bool isMQTTOnline() {
+    portENTER_CRITICAL(&mqttStateLock);
+    const bool online = mqttOnline;
+    portEXIT_CRITICAL(&mqttStateLock);
+    return online;
+}
+
+void setMQTTOnline(bool online) {
+    portENTER_CRITICAL(&mqttStateLock);
+    mqttOnline = online;
+    portEXIT_CRITICAL(&mqttStateLock);
+}
 
 bool connectToMQTT() {
     if (!HubTrust::configured()) {
@@ -502,6 +533,8 @@ bool connectToMQTT() {
             // Deploy subscriptions before publishing
             deploySubscriptions();
             mqttStatusLastSentAt = millis() - mqttStatusInterval;
+            xQueueReset(pairedNodesOutgoing);
+            requestSavedNodes();
 
             // Publish "online" status to the topic
             bool isPublished = mqttPublish(
@@ -571,22 +604,35 @@ unsigned long mqttPingStartedAt = 0;
 bool mqttBrokerReached = false;
 char mqttPingRequestId[33] = {};
 const unsigned long mqttAdminRetryDelay = 30000;
-std::atomic<MQTTPingStatus> mqttPingStatus{MQTTPingStatus::NotStarted};
+MQTTPingStatus mqttPingStatus = MQTTPingStatus::NotStarted;
+
+MQTTPingStatus getMQTTPingStatus() {
+    portENTER_CRITICAL(&mqttStateLock);
+    const MQTTPingStatus status = mqttPingStatus;
+    portEXIT_CRITICAL(&mqttStateLock);
+    return status;
+}
+
+void setMQTTPingStatus(MQTTPingStatus status) {
+    portENTER_CRITICAL(&mqttStateLock);
+    mqttPingStatus = status;
+    portEXIT_CRITICAL(&mqttStateLock);
+}
 
 void checkMQTTConnection() {
-    if (mqttPingStatus != MQTTPingStatus::Passed) {
-        if (mqttPingStatus == MQTTPingStatus::RetryDelay) {
+    if (getMQTTPingStatus() != MQTTPingStatus::Passed) {
+        if (getMQTTPingStatus() == MQTTPingStatus::RetryDelay) {
             if (mqttClient.connected()) mqttClient.loop();
             if (millis() - mqttPingStartedAt < mqttAdminRetryDelay) return;
             mqttPingAttempts = 0;
-            mqttPingStatus = MQTTPingStatus::NotStarted;
+            setMQTTPingStatus(MQTTPingStatus::NotStarted);
         }
-        if (mqttPingStatus == MQTTPingStatus::Waiting) {
+        if (getMQTTPingStatus() == MQTTPingStatus::Waiting) {
             if (mqttClient.connected()) mqttClient.loop();
-            if (mqttPingStatus == MQTTPingStatus::Passed) return;
+            if (getMQTTPingStatus() == MQTTPingStatus::Passed) return;
             if (millis() - mqttPingStartedAt < mqttPingTimeout) return;
 
-            mqttPingStatus = MQTTPingStatus::NotStarted;
+            setMQTTPingStatus(MQTTPingStatus::NotStarted);
             Serial.println("MQTT ping attempt failed: no valid KAGE response.");
             if (mqttPingAttempts >= mqttPingMaxAttempts) {
                 if (mqttBrokerReached) {
@@ -594,10 +640,10 @@ void checkMQTTConnection() {
                     blinkLED(3); // Blink three times to indicate MQTT ping failure
 
                     mqttPingStartedAt = millis();
-                    mqttPingStatus = MQTTPingStatus::RetryDelay;
+                    setMQTTPingStatus(MQTTPingStatus::RetryDelay);
                     return;
                 }
-                mqttPingStatus = MQTTPingStatus::Failed;
+                setMQTTPingStatus(MQTTPingStatus::Failed);
                 return;
             }
         }
@@ -609,7 +655,7 @@ void checkMQTTConnection() {
         Serial.printf("MQTT ping attempt %d/%d\n", mqttPingAttempts, mqttPingMaxAttempts);
         bool connected = connectToMQTT();
         mqttPingStartedAt = millis();
-        mqttPingStatus = MQTTPingStatus::Waiting;
+        setMQTTPingStatus(MQTTPingStatus::Waiting);
         if (connected) {
             mqttBrokerReached = true;
 
@@ -707,20 +753,22 @@ void mqttListener(char* topic, byte* payload, unsigned int length) {
 
 void mqttWorker(void*) {
     MQTTMessage pending = {};
+    static PairedNodesReport pairedNodes;
     bool havePending = false;
     for (;;) {
         checkMQTTConnection();
-        if (mqttPingStatus == MQTTPingStatus::Failed) {
+        if (getMQTTPingStatus() == MQTTPingStatus::Failed) {
             // Stop socket access before the main loop switches Wi-Fi into
             // provisioning mode. Saved credentials remain available.
             mqttClient.disconnect();
-            mqttOnline.store(false);
-            mqttPingStatus = MQTTPingStatus::Provisioning;
+            setMQTTOnline(false);
+            setMQTTPingStatus(MQTTPingStatus::Provisioning);
             vTaskDelete(nullptr);
             return;
         }
-        mqttOnline.store(WiFi.status() == WL_CONNECTED && mqttClient.connected());
-        if (mqttOnline.load()) {
+        const bool online = WiFi.status() == WL_CONNECTED && mqttClient.connected();
+        setMQTTOnline(online);
+        if (online) {
             if (millis() - mqttStatusLastSentAt >= mqttStatusInterval) {
                 String statusTopic = live_prefix + hubId + "/status";
                 if (mqttClient.publish(statusTopic.c_str(), "online", false)) {
@@ -731,6 +779,13 @@ void mqttWorker(void*) {
             if (havePending && mqttClient.publish(pending.topic, pending.payload, pending.retained)) {
                 Serial.println("Published to topic: " + String(pending.topic) + " | Payload: " + String(pending.payload));
                 havePending = false;
+            }
+            if (getMQTTPingStatus() == MQTTPingStatus::Passed &&
+                xQueueReceive(pairedNodesOutgoing, &pairedNodes, 0) == pdTRUE) {
+                String topic = live_prefix + hubId + "/paired_nodes";
+                if (!mqttClient.publish(topic.c_str(), pairedNodes.payload, false)) {
+                    requestSavedNodes();
+                }
             }
         }
         vTaskDelay(pdMS_TO_TICKS(10));
@@ -744,6 +799,32 @@ void processMQTTCommands() {
         Serial.println("Received MQTT command: " + String(message.topic) + " | " + String(message.payload));
         handleMQTTMessage(String(message.topic), String(message.payload));
     }
+}
+
+void queueSendSavedNodes() {
+    static unsigned long lastQueuedAt = 0;
+    const bool intervalElapsed = millis() - lastQueuedAt >= mqttStatusInterval;
+
+    portENTER_CRITICAL(&mqttStateLock);
+    const bool shouldQueue = mqttOnline && mqttPingStatus == MQTTPingStatus::Passed &&
+        (savedNodesRequested || intervalElapsed);
+    if (shouldQueue) savedNodesRequested = false;
+    portEXIT_CRITICAL(&mqttStateLock);
+    if (!shouldQueue) return;
+
+    static PairedNodesReport report;
+    char* next = report.payload;
+    next += sprintf(next, "{\"version\":1,\"mac_addresses\":[");
+    const char* separator = "";
+    for (const auto& mac : pairedNodeMacs) {
+        if (isEmptyMac(mac) || (mac[0] & 1)) continue;
+        next += sprintf(next, "%s\"%02X:%02X:%02X:%02X:%02X:%02X\"",
+            separator, mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+        separator = ",";
+    }
+    strcpy(next, "]}");
+    xQueueOverwrite(pairedNodesOutgoing, &report);
+    lastQueuedAt = millis();
 }
 
 // [Deploy Subscriptions]
@@ -763,6 +844,7 @@ void deploySubscriptions() {
     // One command topic per Hub; the target Node MAC is in the JSON payload.
     String identifyTopic = live_prefix + hubId + "/identify";
     mqttSubscribe(identifyTopic);
+    mqttSubscribe(live_prefix + hubId + "/paired_nodes_request");
 }
 
 
@@ -770,7 +852,7 @@ void deploySubscriptions() {
 void handleMQTTMessage(const String& topic, const String& message) {
 
     if (topic == live_prefix + hubId + "/ping_response") {
-        if (mqttPingStatus != MQTTPingStatus::Waiting) return;
+        if (getMQTTPingStatus() != MQTTPingStatus::Waiting) return;
 
         cJSON* response = cJSON_ParseWithOpts(message.c_str(), nullptr, true);
         const cJSON* data = cJSON_GetObjectItemCaseSensitive(response, "data");
@@ -782,11 +864,17 @@ void handleMQTTMessage(const String& topic, const String& message) {
         cJSON_Delete(response);
 
         if (valid) {
-            mqttPingStatus = MQTTPingStatus::Passed;
+            requestSavedNodes();
+            setMQTTPingStatus(MQTTPingStatus::Passed);
             Serial.println("MQTT ping validated: KAGE admin server is running.");
         } else {
             Serial.println("Invalid MQTT ping response; expected KAGE and the current request_id.");
         }
+        return;
+    }
+
+    if (topic == live_prefix + hubId + "/paired_nodes_request") {
+        if (message == "report") requestSavedNodes();
         return;
     }
 
@@ -1018,7 +1106,7 @@ void packetHandler(
             }
 
             // Discovery is repeated on every PAIRING_REQUEST until the Node is approved or paired. The admin must approve the Node before it can pair with the Hub.
-            if (!mqttOnline.load()) {
+            if (!isMQTTOnline()) {
                 Serial.println("Discovery received but MQTT is offline. Cannot send pairing request to admin.");
                 break;
             }
@@ -1162,7 +1250,7 @@ void packetHandler(
                           receivedPacket.isOccupied ? "occupied" : "empty");
             // Do not queue old sensor readings while the broker is disconnected.
             // The Node repeats its latest reading every 15 seconds.
-            if (!mqttOnline.load()) {
+            if (!isMQTTOnline()) {
                 Serial.println("Occupancy not forwarded: MQTT is offline.");
                 break;
             }
@@ -1213,10 +1301,12 @@ void startHub() {
 
     // Set MQTT callback
     mqttClient.setCallback(mqttListener);
-    mqttClient.setBufferSize(512);
     mqttIncoming = xQueueCreate(20, sizeof(MQTTMessage));
     mqttOutgoing = xQueueCreate(20, sizeof(MQTTMessage));
-    if (mqttIncoming == nullptr || mqttOutgoing == nullptr ||
+    pairedNodesOutgoing = xQueueCreate(1, sizeof(PairedNodesReport));
+    // Reserve the payload plus the longest queued topic and MQTT framing.
+    if (!mqttClient.setBufferSize(sizeof(PairedNodesReport) + sizeof(MQTTMessage::topic) + 8) ||
+        mqttIncoming == nullptr || mqttOutgoing == nullptr || pairedNodesOutgoing == nullptr ||
         xTaskCreate(mqttWorker, "kage-mqtt", 6144, nullptr, 1, nullptr) != pdPASS) {
         Serial.println("Failed to start MQTT worker. Restarting...");
         ESP.restart();
@@ -1303,7 +1393,7 @@ void loop() {
         return;
     }
 
-    if (mqttPingStatus == MQTTPingStatus::Provisioning) {
+    if (getMQTTPingStatus() == MQTTPingStatus::Provisioning) {
         Serial.println("MQTT broker connection failed after 3 attempts. Starting provisioning; saved credentials retained.");
         HubProvisioning::start();
         return;
@@ -1353,6 +1443,7 @@ void loop() {
 
     // [MQTT Connection Check]
     processMQTTCommands();
+    queueSendSavedNodes();
 
     delay(1);
 }

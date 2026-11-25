@@ -4,7 +4,9 @@ import { clientState, parseRequest, reply } from './protocol.ts';
 import { enroll } from './enrollment.ts';
 import { activeCommand, capabilities, protocolVersion, recordReport } from './lifecycle.ts';
 import { recordOccupancy } from './occupancy.ts';
+import { recordPairedNodes, savePairedNode } from './paired-nodes.ts';
 import { changePolicyCommand, PolicyCommandError, recordActivity } from './policies.ts';
+import { provisioningPasswordHash } from '../provisioning.ts';
 
 export type BrokerContext = { id: string; tenant_id: string };
 
@@ -41,9 +43,10 @@ export async function stateForClient(tenant: string, id: string) {
 		m.node_id,n.mac_address,n.paired AS node_paired,n.occupancy AS node_occupancy,n.last_seen AS node_last_seen,
 		p.enabled AS policy_enabled,p.action,p.delay_seconds,p.allow_extension,p.extension_duration_seconds,
 		p.maximum_extensions,p.inactivity_monitoring_enabled,p.inactivity_timeout_seconds,p.confirmation_timeout_seconds,
-		c.capabilities AS client_capabilities
+		c.capabilities AS client_capabilities,d.id AS credential_id,d.provisioning_password_encrypted
 		FROM kage_clients c JOIN kage_hubs h ON h.id=c.hub_id AND h.tenant_id=c.tenant_id
 		JOIN kage_mqtt_brokers b ON b.id=c.broker_id AND b.tenant_id=c.tenant_id
+		LEFT JOIN kage_device_credentials d ON d.tenant_id=c.tenant_id AND d.client_id=c.id AND d.status='admin_confirmed'
 		LEFT JOIN kage_node_client_mappings m ON m.tenant_id=c.tenant_id AND m.client_id=c.id
 		LEFT JOIN kage_nodes n ON n.tenant_id=m.tenant_id AND n.id=m.node_id
 		LEFT JOIN kage_security_policies p ON p.tenant_id=c.tenant_id
@@ -59,6 +62,9 @@ export async function stateForClient(tenant: string, id: string) {
 		capabilities,
 		command_version: Number(rows[0].command_version),
 		server_time_utc: new Date().toISOString(),
+		...(rows[0].provisioning_password_encrypted ? {
+			provisioning_password_hash: provisioningPasswordHash(tenant, rows[0].credential_id, rows[0].provisioning_password_encrypted)
+		} : {}),
 		policies:
 			rows[0].policy_enabled == null
 				? null
@@ -126,7 +132,17 @@ export async function ingest(
 	) {
 		// The Hub wildcard also receives server publications and unknown message types.
 		if (
-			!['ping_request', 'identify_result', 'status', 'occupancy', 'pairing_request', 'pairing_confirm', 'unpair_request', 'unpair_confirm'].includes(parts[4])
+			![
+				'ping_request',
+				'identify_result',
+				'status',
+				'occupancy',
+				'paired_nodes',
+				'pairing_request',
+				'pairing_confirm',
+				'unpair_request',
+				'unpair_confirm'
+			].includes(parts[4])
 		) {
 			return;
 		}
@@ -140,6 +156,11 @@ export async function ingest(
 		).rows[0];
 
 		if (!hub) return;
+
+		if (parts[4] === 'paired_nodes') {
+			await recordPairedNodes(context, hub.id, payload);
+			return;
+		}
 
 		if (parts[4] === 'occupancy') {
 			if (parts.length !== 7) return;
@@ -274,15 +295,15 @@ export async function ingest(
 			if (!approved.rowCount) return;
 
 			if (kind === 'pair') {
-				const result = await db.query(
-					`INSERT INTO kage_nodes(tenant_id,hub_id,mac_address,paired) VALUES ($1,$2,$3,true)
-					ON CONFLICT(tenant_id,mac_address) DO UPDATE SET paired=true,hub_id=$2
-					WHERE NOT kage_nodes.paired OR kage_nodes.hub_id=$2 RETURNING id`,
-					[tenant, hub.id, mac]
-				);
-
-				if (!result.rowCount) throw new Error('Node belongs to another Hub');
+			if (!(await savePairedNode(db, tenant, hub.id, mac))) {
+				throw new Error('Node belongs to another Hub');
+			}
 			} else {
+			await db.query(
+				`UPDATE kage_hubs SET paired_node_macs=array_remove(paired_node_macs,$3)
+				WHERE tenant_id=$1 AND id=$2 AND $3=ANY(paired_node_macs)`,
+				[tenant, hub.id, mac]
+			);
 				await db.query(
 					`UPDATE kage_device_states SET dirty=true,updated_at=now() WHERE tenant_id=$1 AND client_id IN
 					(SELECT m.client_id FROM kage_node_client_mappings m JOIN kage_nodes n ON n.tenant_id=m.tenant_id AND n.id=m.node_id WHERE n.tenant_id=$1 AND n.hub_id=$2 AND n.mac_address=$3)`,
@@ -371,17 +392,57 @@ export async function ingest(
 			/^kage-session-[a-f0-9]{32}$/.test(request.data.session_id);
 
 		if (supported) {
-			await pool.query(
-				`UPDATE kage_clients SET protocol_version=$3,capabilities=$4,presence_session=$5,connection_state='unknown'
-            WHERE tenant_id=$1 AND id=$2`,
-				[
-					tenant,
-					client.id,
-					protocolVersion,
-					JSON.stringify(request.data.capabilities),
-					request.data.session_id
-				]
-			);
+			const version = request.data.command_version;
+			const journalVersion =
+				typeof version === 'number' &&
+				Number.isSafeInteger(version) &&
+				version >= 0 &&
+				version < Number.MAX_SAFE_INTEGER
+					? version
+					: 0;
+			await transaction(async (db) => {
+				const { rows } = await db.query(
+					'SELECT command_version FROM kage_clients WHERE tenant_id=$1 AND id=$2 FOR UPDATE',
+					[tenant, client.id]
+				);
+				// Preserve the client's replay protection when its Admin record was recreated.
+				await db.query(
+					`UPDATE kage_clients SET protocol_version=$3,capabilities=$4,presence_session=$5,
+						connection_state='unknown',command_version=GREATEST(command_version,$6::bigint)
+					WHERE tenant_id=$1 AND id=$2`,
+					[
+						tenant,
+						client.id,
+						protocolVersion,
+						JSON.stringify(request.data.capabilities),
+						request.data.session_id,
+						journalVersion
+					]
+				);
+				if (journalVersion > Number(rows[0]?.command_version)) {
+					// Retry a missed countdown for the current vacancy after the next live heartbeat.
+					await db.query(
+						`UPDATE kage_clients c SET policy_runtime=c.policy_runtime-'presence'
+						WHERE c.tenant_id=$1 AND c.id=$2 AND (
+							SELECT q.kind IN ('auto_lock','auto_logout')
+								AND q.status IN ('queued','dispatching','published','expired')
+								AND NOT (q.report ? 'status')
+							FROM kage_commands q
+							WHERE q.tenant_id=c.tenant_id AND q.client_id=c.id AND q.version<=$3
+								AND q.payload->>'reason'='presence'
+								AND q.payload->>'episode'=c.policy_runtime->>'presence'
+							ORDER BY q.version DESC LIMIT 1
+						)`,
+						[tenant, client.id, journalVersion]
+					);
+					await db.query(
+						`UPDATE kage_commands SET status='superseded'
+						WHERE tenant_id=$1 AND client_id=$2 AND version<=$3
+						AND status IN ('queued','dispatching','published')`,
+						[tenant, client.id, journalVersion]
+					);
+				}
+			});
 		}
 
 		await publish(

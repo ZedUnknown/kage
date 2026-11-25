@@ -17,7 +17,7 @@
 	import ClockCounterClockwise from '#lib/client/components/icons/ClockCounterClockwise.svelte';
 	import UserCircle from '#lib/client/components/icons/UserCircle.svelte';
 	import ClassicSidebar from '#lib/client/components/icons/ClassicSidebar.svelte';
-	import XCircle from '#lib/client/components/icons/XCircle.svelte';
+	import CloseButton from '#lib/client/components/common/CloseButton.svelte';
 	import PullToRefresh from '#lib/client/components/common/PullToRefresh.svelte';
 	import LogoLoader from '#lib/client/components/common/LogoLoader.svelte';
 
@@ -132,15 +132,12 @@
 	>
 		<div class="sidebar-top">
 			<KageBrand compact={sidebarCollapsed && !workspace.mobileOpen} />
-			<button
-				bind:this={workspace.closeMenuButton}
-				type="button"
-				class="icon-button mobile-only"
+			<CloseButton
+				bind:button={workspace.closeMenuButton}
+				class="mobile-only"
 				aria-label="Close navigation"
 				onclick={workspace.closeMobileMenu}
-			>
-				<XCircle properties="size-5" />
-			</button>
+			/>
 		</div>
 		<div class="sidebar-divider" aria-hidden="true"></div>
 		<nav id="workspace-navigation" aria-label="Workspace">
@@ -180,7 +177,7 @@
 	</aside>
 	<main class="workspace" inert={workspace.isMobile && workspace.mobileOpen}>
 		<PullToRefresh
-			onRefresh={() => workspace.refresh(true)}
+			onRefresh={workspace.refresh}
 			disabled={!workspace.isMobile || workspace.mobileOpen || workspace.busy}
 		>
 			{@render children()}
@@ -188,7 +185,7 @@
 	</main>
 </div>
 {/if}
-{#if !sidebarReady || initialLoading || navigationLoading || workspace.busy || workspace.foregroundLoading}
+{#if !sidebarReady || initialLoading || navigationLoading}
 	<div class="logo-loading" role="status" aria-label="Loading">
 		<LogoLoader onFirstRevealComplete={initialLoading ? () => (initialLoading = false) : undefined} />
 	</div>
